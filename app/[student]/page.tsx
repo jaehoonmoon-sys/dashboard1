@@ -1,0 +1,469 @@
+import Link from "next/link";
+import { supabase } from "../../lib/supabase";
+import TimelineChart, { ConditionPoint } from "./TimelineChart";
+import ConditionCalendar, { ConditionLog } from "./ConditionCalendar";
+import PeerChapterCard, { PeerComment } from "./PeerChapterCard";
+
+export const dynamic = "force-dynamic";
+
+type TimelineRow = {
+  id: number;
+  student_name: string;
+  cohort: string;
+  chapter: string;
+  chapter_order: number;
+  team_no: number | null;
+  role: string | null;
+  peer_communication: number | null;
+  peer_skill: number | null;
+  peer_growth: number | null;
+  peer_immersion: number | null;
+  self_communication: number | null;
+  self_skill: number | null;
+  self_growth: number | null;
+  self_immersion: number | null;
+  nps_score: number | null;
+  nps_comment: string | null;
+  ops_satisfaction: number | null;
+  ops_satisfaction_comment: string | null;
+  self_comment_comm_immerse: string | null;
+  self_comment_skill_growth: string | null;
+  submitted_at: string;
+};
+
+type InterviewRow = {
+  id: number;
+  notion_url: string;
+  interview_date: string;
+  student_name: string;
+  interviewer: string | null;
+  summary: string | null;
+  types: string[];
+  chapter: string | null;
+  title: string;
+  content: string | null;
+};
+
+type ConditionRow = {
+  id: number;
+  student_name: string | null;
+  score: number | null;
+  content: string | null;
+  contact_request: boolean;
+  logged_at: string | null;
+};
+
+const CURRICULUM = [
+  { order: 0, name: "CH.0 온보딩", period: "4/20 ~ 4/24" },
+  { order: 1, name: "CH.1 마케팅 입문", period: "4/27 ~ 5/12" },
+  { order: 2, name: "CH.2 기초 프로젝트", period: "5/13 ~ 5/19" },
+  { order: 3, name: "CH.3 마케팅 숙련", period: "5/20 ~ 6/11" },
+  { order: 4, name: "CH.4 심화 프로젝트", period: "6/12 ~ 6/25" },
+  { order: 5, name: "CH.5 마케팅 심화", period: "6/26 ~ 7/9" },
+  { order: 6, name: "CH.6 실전 프로젝트", period: "7/10 ~ 7/16" },
+  { order: 7, name: "CH.7 고객 데이터", period: "7/20 ~ 7/28" },
+  { order: 8, name: "CH.8 그로스 마케팅", period: "7/29 ~ 8/11" },
+  { order: 9, name: "CH.9 최종 프로젝트", period: "8/12 ~ 9/8" },
+];
+
+const CHAPTER_END: Record<number, string> = {
+  0: "2026-04-24", 1: "2026-05-12", 2: "2026-05-19",
+  3: "2026-06-11", 4: "2026-06-25", 5: "2026-07-09",
+  6: "2026-07-16", 7: "2026-07-28", 8: "2026-08-11", 9: "2026-09-08",
+};
+
+const TYPE_COLOR: Record<string, string> = {
+  "하차 희망": "#DC2626", 고관여자면담: "#DC2626", 방향성고민: "#8B5CF6",
+  팀플진행: "#3B82F6", 과제수행: "#EC4899", 포트폴리오: "#92400E",
+  취업방향: "#F59E0B", 단순질의: "#9CA3AF", TIL: "#3B82F6",
+  과제피드백: "#9CA3AF", SNS채널: "#10B981",
+};
+
+// 면담 날짜 → 챕터 순서 매핑
+function dateToChapterOrder(date: string): number {
+  const d = date.slice(0, 10);
+  if (d < "2026-04-20") return 0;
+  if (d <= "2026-04-26") return 0;
+  if (d <= "2026-05-12") return 1;
+  if (d <= "2026-05-19") return 2;
+  if (d <= "2026-06-11") return 3;
+  if (d <= "2026-06-25") return 4;
+  if (d <= "2026-07-09") return 5;
+  if (d <= "2026-07-19") return 6;
+  if (d <= "2026-07-28") return 7;
+  if (d <= "2026-08-11") return 8;
+  return 9;
+}
+
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ student: string }>;
+}) {
+  const { student } = await params;
+  const studentName = decodeURIComponent(student);
+
+  const [tlRes, intvRes, peerRecRes, peerGivRes, condRes] = await Promise.all([
+    supabase
+      .from("mj_student_timeline")
+      .select("*")
+      .eq("student_name", studentName)
+      .eq("cohort", "AI 기반 디지털 마케팅 부트캠프 5회차")
+      .order("chapter_order", { ascending: true }),
+    supabase
+      .from("mj_interview_records")
+      .select("*")
+      .eq("student_name", studentName)
+      .order("interview_date", { ascending: true }),
+    supabase
+      .from("mj_peer_comments")
+      .select("*")
+      .eq("evaluated_name", studentName)
+      .neq("evaluator_name", studentName)
+      .order("submitted_at", { ascending: true }),
+    supabase
+      .from("mj_peer_comments")
+      .select("*")
+      .eq("evaluator_name", studentName)
+      .neq("evaluated_name", studentName)
+      .order("submitted_at", { ascending: true }),
+    supabase
+      .from("mj_condition_logs")
+      .select("*")
+      .eq("student_name", studentName)
+      .order("logged_at", { ascending: true }),
+  ]);
+
+  const timeline = (tlRes.data ?? []) as TimelineRow[];
+  const interviews = (intvRes.data ?? []) as InterviewRow[];
+  const peerReceived = (peerRecRes.data ?? []) as PeerComment[];
+  const peerGiven = (peerGivRes.data ?? []) as PeerComment[];
+  const conditionLogs = (condRes.data ?? []) as ConditionRow[];
+
+  const byChapter = new Map<number, TimelineRow>();
+  for (const t of timeline) {
+    if (!byChapter.has(t.chapter_order)) byChapter.set(t.chapter_order, t);
+  }
+
+  // 면담 챕터별 그룹
+  const interviewsByChapter = new Map<number, InterviewRow[]>();
+  for (const iv of interviews) {
+    const order = dateToChapterOrder(iv.interview_date);
+    if (!interviewsByChapter.has(order)) interviewsByChapter.set(order, []);
+    interviewsByChapter.get(order)!.push(iv);
+  }
+
+  const evaluations = timeline.map((t) => ({
+    date: CHAPTER_END[t.chapter_order] ?? t.submitted_at.slice(0, 10),
+    nps: t.nps_score,
+    ops: t.ops_satisfaction,
+    chapter: CURRICULUM[t.chapter_order]?.name ?? t.chapter,
+    nps_comment: t.nps_comment,
+    ops_comment: t.ops_satisfaction_comment,
+  }));
+
+  const interviewPoints = interviews.map((iv) => ({
+    date: iv.interview_date,
+    types: iv.types ?? [],
+    summary: iv.summary,
+    content: iv.content,
+    chapter: iv.chapter,
+  }));
+
+  const conditionPoints: ConditionPoint[] = conditionLogs.map((c) => ({
+    date: c.logged_at?.slice(0, 10) ?? "",
+    score: c.score,
+    content: c.content,
+    contact_request: c.contact_request,
+  }));
+
+  const calendarLogs: ConditionLog[] = conditionLogs.map((c) => ({
+    score: c.score,
+    content: c.content,
+    contact_request: c.contact_request,
+    logged_at: c.logged_at,
+  }));
+
+  // 동료평가에 등장하는 학생들의 챕터별 role 조회
+  const peerNames = [
+    ...new Set([
+      ...peerReceived.map((p) => p.evaluator_name).filter((n): n is string => n != null),
+      ...peerGiven.map((p) => p.evaluated_name),
+    ]),
+  ];
+  const roleRows =
+    peerNames.length > 0
+      ? (
+          (
+            await supabase
+              .from("mj_student_timeline")
+              .select("student_name, role, chapter")
+              .in("student_name", peerNames)
+              .not("role", "is", null)
+          ).data ?? []
+        )
+      : [];
+  const roleMap: Record<string, string> = {};
+  for (const r of roleRows) {
+    roleMap[`${r.student_name}||${r.chapter}`] = r.role;
+  }
+
+  const peerRecByChapter = new Map<string, PeerComment[]>();
+  for (const p of peerReceived) {
+    const key = p.chapter ?? "챕터 미상";
+    if (!peerRecByChapter.has(key)) peerRecByChapter.set(key, []);
+    peerRecByChapter.get(key)!.push(p);
+  }
+
+  const peerGivByChapter = new Map<string, PeerComment[]>();
+  for (const p of peerGiven) {
+    const key = p.chapter ?? "챕터 미상";
+    if (!peerGivByChapter.has(key)) peerGivByChapter.set(key, []);
+    peerGivByChapter.get(key)!.push(p);
+  }
+
+  const allPeerChapters = Array.from(
+    new Set([...peerRecByChapter.keys(), ...peerGivByChapter.keys()])
+  ).sort();
+
+  return (
+    <main style={{ maxWidth: 1200, margin: "0 auto", padding: "48px 24px" }}>
+      <header style={{ marginBottom: 32 }}>
+        <Link
+          href="/"
+          style={{
+            display: "inline-block", fontSize: 12, color: "#999",
+            textDecoration: "none", marginBottom: 12, letterSpacing: "0.1em",
+          }}
+        >
+          ← 전체 명단
+        </Link>
+        <h1 style={{ fontSize: 32, fontWeight: 700, margin: 0 }}>{studentName}</h1>
+        <p style={{ color: "#666", marginTop: 6, marginBottom: 0, fontSize: 14 }}>
+          디마 5기 · 평가 {timeline.length}건 · 면담 {interviews.length}건 ·
+          동료평가 받은 {peerReceived.length}건 · 준 {peerGiven.length}건 · 컨디션 {conditionLogs.length}건
+        </p>
+      </header>
+
+      {/* 시계열 차트 */}
+      <h2 style={{ fontSize: 18, margin: "0 0 12px" }}>📈 시계열</h2>
+      <p style={{ fontSize: 12, color: "#888", marginTop: 0, marginBottom: 12 }}>
+        NPS·운영만족도 (좌축) · 컨디션 (우축 0–4) · 면담 마커 (초록)
+      </p>
+      <section style={{
+        background: "#FFF", border: "1px solid #E8E8E8", borderRadius: 8,
+        padding: "16px 8px 8px", marginBottom: 36,
+      }}>
+        <TimelineChart
+          evaluations={evaluations}
+          interviews={interviewPoints}
+          conditionLogs={conditionPoints}
+        />
+      </section>
+
+      {/* 2-col: 챕터 상세 + 면담 | 컨디션 달력 */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 32, marginBottom: 48, alignItems: "start" }}>
+        <div>
+          <h2 style={{ fontSize: 18, margin: "0 0 16px" }}>📊 챕터별 상세</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {CURRICULUM.map((ch) => {
+              const data = byChapter.get(ch.order);
+              const chInterviews = interviewsByChapter.get(ch.order) ?? [];
+              return (
+                <div key={ch.order}>
+                  <ChapterCard chapter={ch} data={data} />
+                  {chInterviews.length > 0 && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, paddingLeft: 12, borderLeft: "2px solid #E5E7EB" }}>
+                      {chInterviews.map((iv) => (
+                        <InterviewCard key={iv.id} iv={iv} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ position: "sticky", top: 24 }}>
+          <h2 style={{ fontSize: 18, margin: "0 0 12px" }}>🗓 컨디션 달력</h2>
+          <p style={{ fontSize: 11, color: "#999", marginTop: 0, marginBottom: 12 }}>
+            날짜에 커서를 올리면 코멘트·상담신청 여부 표시
+          </p>
+          <section style={{
+            background: "#FFF", border: "1px solid #E8E8E8",
+            borderRadius: 8, padding: 16,
+          }}>
+            <ConditionCalendar logs={calendarLogs} />
+          </section>
+        </div>
+      </div>
+
+      {/* 동료평가 */}
+      <h2 style={{ fontSize: 18, margin: "0 0 16px" }}>
+        👥 동료평가 (받은 {peerReceived.length}건 · 준 {peerGiven.length}건)
+      </h2>
+      <section style={{ marginBottom: 48 }}>
+        {peerReceived.length === 0 && peerGiven.length === 0 ? (
+          <p style={{ color: "#999", fontSize: 14 }}>동료평가 기록 없음</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {allPeerChapters.map((chapter) => (
+              <PeerChapterCard
+                key={chapter}
+                chapter={chapter}
+                received={peerRecByChapter.get(chapter) ?? []}
+                given={peerGivByChapter.get(chapter) ?? []}
+                roleMap={roleMap}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </main>
+  );
+}
+
+// ─── 챕터 카드 ─────────────────────────────────────────────
+
+function ChapterCard({
+  chapter,
+  data,
+}: {
+  chapter: { order: number; name: string; period: string };
+  data: TimelineRow | undefined;
+}) {
+  const hasData = !!data;
+  return (
+    <div style={{
+      background: "#FFF", border: "1px solid #E8E8E8",
+      borderLeft: `4px solid ${hasData ? "#3B82F6" : "#E5E7EB"}`,
+      borderRadius: 8, padding: 20, opacity: hasData ? 1 : 0.55,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: hasData ? 16 : 0 }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{chapter.name}</div>
+          <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>{chapter.period}</div>
+        </div>
+        {hasData ? (
+          <div style={{ fontSize: 12, color: "#666" }}>팀 {data!.team_no ?? "-"} · {data!.role ?? "-"}</div>
+        ) : (
+          <div style={{ fontSize: 12, color: "#BBB" }}>데이터 없음</div>
+        )}
+      </div>
+
+      {hasData && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr) repeat(2, 1fr)", gap: 12, marginBottom: 16 }}>
+            <ScoreCell label="소통" peer={data!.peer_communication} self={data!.self_communication} max={7} />
+            <ScoreCell label="실력" peer={data!.peer_skill} self={data!.self_skill} max={7} />
+            <ScoreCell label="성장" peer={data!.peer_growth} self={data!.self_growth} max={7} />
+            <ScoreCell label="몰입" peer={data!.peer_immersion} self={data!.self_immersion} max={7} />
+            <ScoreCell label="NPS" peer={data!.nps_score} max={10} solo />
+            <ScoreCell label="운영만족도" peer={data!.ops_satisfaction} max={10} solo />
+          </div>
+
+          {(data!.nps_comment || data!.ops_satisfaction_comment || data!.self_comment_comm_immerse || data!.self_comment_skill_growth) && (
+            <details style={{ fontSize: 13, color: "#444" }}>
+              <summary style={{ cursor: "pointer", color: "#666" }}>코멘트 펼치기</summary>
+              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10, paddingLeft: 8, borderLeft: "2px solid #E8E8E8", paddingTop: 4 }}>
+                {data!.nps_comment && <CommentBlock label="NPS 코멘트" body={data!.nps_comment} />}
+                {data!.ops_satisfaction_comment && <CommentBlock label="운영만족도 코멘트" body={data!.ops_satisfaction_comment} />}
+                {data!.self_comment_comm_immerse && <CommentBlock label="자평: 소통/몰입" body={data!.self_comment_comm_immerse} />}
+                {data!.self_comment_skill_growth && <CommentBlock label="자평: 실력/성장" body={data!.self_comment_skill_growth} />}
+              </div>
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── 면담 카드 ─────────────────────────────────────────────
+
+function InterviewCard({ iv }: { iv: InterviewRow }) {
+  return (
+    <details style={{ background: "#FFF", border: "1px solid #E8E8E8", borderRadius: 8, overflow: "hidden" }}>
+      <summary style={{ listStyle: "none", padding: 16, cursor: "pointer", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{iv.interview_date}</span>
+            {iv.chapter && <span style={{ color: "#999", fontSize: 12 }}>· {iv.chapter}</span>}
+            {iv.interviewer && (
+              <span style={{
+                fontSize: 11, padding: "2px 8px", borderRadius: 10,
+                background: "#F3E8FF", color: "#7C3AED", fontWeight: 600,
+              }}>
+                👤 {iv.interviewer}
+              </span>
+            )}
+          </div>
+          <span style={{ color: "#999", fontSize: 11 }}>▼ 펼치기</span>
+        </div>
+
+        {iv.types && iv.types.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {iv.types.map((t) => (
+              <span key={t} style={{
+                fontSize: 11, padding: "2px 8px", borderRadius: 10,
+                background: `${TYPE_COLOR[t] ?? "#9CA3AF"}1A`,
+                color: TYPE_COLOR[t] ?? "#6B7280", fontWeight: 600,
+              }}>
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {iv.summary && <div style={{ fontSize: 13, color: "#444" }}>{iv.summary}</div>}
+      </summary>
+
+      <div style={{ padding: "0 16px 16px", borderTop: "1px solid #F0F0F0" }}>
+        {iv.content ? (
+          <div style={{ fontSize: 13, color: "#333", whiteSpace: "pre-wrap", lineHeight: 1.7, paddingTop: 12 }}>
+            {iv.content}
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: "#999", paddingTop: 12 }}>본문 미적재</div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+// ─── 공통 컴포넌트 ─────────────────────────────────────────
+
+function ScoreCell({ label, peer, self, max, solo }: {
+  label: string; peer: number | null; self?: number | null; max: number; solo?: boolean;
+}) {
+  const color = peer == null ? "#D1D5DB" : riskColor(peer, max);
+  return (
+    <div style={{ background: "#F9FAFB", borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
+      <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, color }}>
+        {peer != null ? peer.toFixed(1) : "—"}
+      </div>
+      {!solo && self != null && (
+        <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>자평 {self.toFixed(1)}</div>
+      )}
+    </div>
+  );
+}
+
+function CommentBlock({ label, body }: { label: string; body: string }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: "#888", marginBottom: 2, letterSpacing: "0.05em" }}>{label}</div>
+      <div style={{ fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>{body}</div>
+    </div>
+  );
+}
+
+function riskColor(score: number, max: number): string {
+  const r = score / max;
+  if (r < 0.5) return "#DC2626";
+  if (r < 0.65) return "#F59E0B";
+  if (r < 0.8) return "#3B82F6";
+  return "#10B981";
+}

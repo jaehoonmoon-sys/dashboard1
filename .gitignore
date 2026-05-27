@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# Next.js build output
+.next/
+out/
+
+# env files (실제 키 포함)
+.env.local
+.env*.local
+
+# data files (수강생 실데이터)
+redash_7200.json
+chunk_*.sql
+mj_eval_insert.sql
+
+# claude local settings
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
