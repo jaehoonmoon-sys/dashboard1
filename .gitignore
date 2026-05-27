@@ -20,3 +20,5 @@ mj_eval_insert.sql
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
