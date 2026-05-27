@@ -1,5 +1,6 @@
 "use client";
 
+import { NotionContent } from "./NotionContent";
 import {
   Line,
   XAxis,
@@ -374,19 +375,15 @@ function CustomTooltip({ active, payload }: any) {
           {p.content && (
             <div
               style={{
-                fontSize: 11,
                 color: "#666",
                 marginTop: 6,
                 paddingTop: 6,
                 borderTop: "1px solid #F0F0F0",
-                whiteSpace: "pre-wrap",
                 maxHeight: 200,
                 overflow: "hidden",
-                lineHeight: 1.5,
               }}
             >
-              {p.content.slice(0, 400)}
-              {p.content.length > 400 ? "…" : ""}
+              <NotionContent content={p.content} compact maxChars={400} />
             </div>
           )}
         </>

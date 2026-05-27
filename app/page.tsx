@@ -1,115 +1,70 @@
-import { supabase } from "../lib/supabase";
-import DashboardTable, { StudentSummary, InterviewStat } from "./DashboardTable";
+import Link from "next/link";
+import RefreshButton from "./RefreshButton";
 
-export const dynamic = "force-dynamic";
-
-type RiskLevel = "낮음" | "중간" | "높음" | "심각" | "없음";
-
-export default async function Page() {
-  const today = new Date().toISOString().slice(0, 10);
-
-  const [summaryRes, intvRes, condRes] = await Promise.all([
-    supabase
-      .from("mj_student_summary")
-      .select("*")
-      .eq("cohort", "AI 기반 디지털 마케팅 부트캠프 5회차"),
-    supabase.from("mj_student_interview_stats").select("*"),
-    supabase
-      .from("mj_condition_logs")
-      .select("student_name, score")
-      .gte("logged_at", `${today}T00:00:00`)
-      .lte("logged_at", `${today}T23:59:59`)
-      .not("student_name", "is", null),
-  ]);
-
-  const students = (summaryRes.data ?? []) as StudentSummary[];
-  const stats = (intvRes.data ?? []) as InterviewStat[];
-
-  const todayConditions = new Map<string, number>();
-  for (const row of condRes.data ?? []) {
-    if (row.student_name && row.score != null) {
-      todayConditions.set(row.student_name, row.score);
-    }
-  }
-
-  const critical = students.filter((s) =>
-    [s.comm_risk, s.skill_risk, s.nps_risk, s.ops_risk].includes("심각")
-  );
-  const high = students.filter(
-    (s) =>
-      ![s.comm_risk, s.skill_risk, s.nps_risk, s.ops_risk].includes("심각") &&
-      [s.comm_risk, s.skill_risk, s.nps_risk, s.ops_risk].includes("낮음")
-  );
-
+export default function Page() {
   return (
-    <main style={{ maxWidth: 1280, margin: "0 auto", padding: "48px 24px" }}>
-      <header style={{ marginBottom: 32 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>
-          🎯 트랙 저성과자 면담 관리
-        </h1>
-        <p style={{ color: "#666", marginTop: 8, marginBottom: 0 }}>
-          디마5기 · 컬럼 헤더 클릭으로 정렬 · 수강생 클릭 시 상세 페이지
-        </p>
-      </header>
+    <main style={{ maxWidth: 900, margin: "0 auto", padding: "80px 24px" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 56 }}>
+        <div>
+          <h1 style={{ fontSize: 36, fontWeight: 700, margin: 0 }}>디마 5기 대시보드</h1>
+          <p style={{ color: "#666", marginTop: 10, marginBottom: 0, fontSize: 15 }}>
+            AI 기반 디지털 마케팅 부트캠프 5회차
+          </p>
+        </div>
+        <RefreshButton />
+      </div>
 
-      <section
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 16,
-          marginBottom: 32,
-        }}
-      >
-        <Stat label="전체 수강생" value={students.length} accent="#1A1A1A" />
-        <Stat label="심각 1개+ 보유" value={critical.length} accent="#DC2626" />
-        <Stat label="높음만 (심각 X)" value={high.length} accent="#F59E0B" />
-      </section>
-
-      <DashboardTable
-        students={students}
-        stats={stats}
-        hrefPrefix=""
-        todayConditions={todayConditions}
-      />
-
-      <footer style={{ marginTop: 48, color: "#999", fontSize: 13 }}>
-        디마5기 · {students.length}명 · 면담 {stats.length}명 cross-ref ·
-        Pocketwatch 문재훈 · D-day 2026-05-22
-      </footer>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        <NavCard
+          href="/interviews"
+          emoji="🎯"
+          title="면담 관리"
+          description="저성과자 면담 현황 및 위험도 추적"
+          accent="#3B82F6"
+        />
+        <NavCard
+          href="/attendance"
+          emoji="📋"
+          title="출결 분석"
+          description="PM 시트 vs 시스템 출결 비교 분석"
+          accent="#10B981"
+        />
+      </div>
     </main>
   );
 }
 
-function Stat({
-  label,
-  value,
+function NavCard({
+  href,
+  emoji,
+  title,
+  description,
   accent,
 }: {
-  label: string;
-  value: number;
+  href: string;
+  emoji: string;
+  title: string;
+  description: string;
   accent: string;
 }) {
   return (
-    <div
+    <Link
+      href={href}
       style={{
+        display: "block",
+        padding: "32px 28px",
         background: "#FFF",
         border: "1px solid #E8E8E8",
-        borderRadius: 8,
-        padding: "20px 24px",
+        borderTop: `4px solid ${accent}`,
+        borderRadius: 10,
+        textDecoration: "none",
+        color: "inherit",
+        transition: "box-shadow 0.15s",
       }}
     >
-      <div style={{ fontSize: 13, color: "#666" }}>{label}</div>
-      <div
-        style={{
-          fontSize: 36,
-          fontWeight: 700,
-          color: accent,
-          marginTop: 4,
-          lineHeight: 1.1,
-        }}
-      >
-        {value}
-      </div>
-    </div>
+      <div style={{ fontSize: 32, marginBottom: 12 }}>{emoji}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 14, color: "#666", lineHeight: 1.5 }}>{description}</div>
+    </Link>
   );
 }

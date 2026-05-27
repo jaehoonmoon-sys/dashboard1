@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "../../../lib/supabase";
 import TimelineChart, { ConditionPoint } from "./TimelineChart";
 import ConditionCalendar, { ConditionLog } from "./ConditionCalendar";
 import PeerChapterCard, { PeerComment } from "./PeerChapterCard";
+import { NotionContent } from "./NotionContent";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +80,6 @@ const TYPE_COLOR: Record<string, string> = {
   과제피드백: "#9CA3AF", SNS채널: "#10B981",
 };
 
-// 면담 날짜 → 챕터 순서 매핑
 function dateToChapterOrder(date: string): number {
   const d = date.slice(0, 10);
   if (d < "2026-04-20") return 0;
@@ -145,7 +145,6 @@ export default async function Page({
     if (!byChapter.has(t.chapter_order)) byChapter.set(t.chapter_order, t);
   }
 
-  // 면담 챕터별 그룹
   const interviewsByChapter = new Map<number, InterviewRow[]>();
   for (const iv of interviews) {
     const order = dateToChapterOrder(iv.interview_date);
@@ -184,7 +183,6 @@ export default async function Page({
     logged_at: c.logged_at,
   }));
 
-  // 동료평가에 등장하는 학생들의 챕터별 role 조회
   const peerNames = [
     ...new Set([
       ...peerReceived.map((p) => p.evaluator_name).filter((n): n is string => n != null),
@@ -230,7 +228,7 @@ export default async function Page({
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: "48px 24px" }}>
       <header style={{ marginBottom: 32 }}>
         <Link
-          href="/"
+          href="/interviews"
           style={{
             display: "inline-block", fontSize: 12, color: "#999",
             textDecoration: "none", marginBottom: 12, letterSpacing: "0.1em",
@@ -245,7 +243,6 @@ export default async function Page({
         </p>
       </header>
 
-      {/* 시계열 차트 */}
       <h2 style={{ fontSize: 18, margin: "0 0 12px" }}>📈 시계열</h2>
       <p style={{ fontSize: 12, color: "#888", marginTop: 0, marginBottom: 12 }}>
         NPS·운영만족도 (좌축) · 컨디션 (우축 0–4) · 면담 마커 (초록)
@@ -261,7 +258,6 @@ export default async function Page({
         />
       </section>
 
-      {/* 2-col: 챕터 상세 + 면담 | 컨디션 달력 */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 32, marginBottom: 48, alignItems: "start" }}>
         <div>
           <h2 style={{ fontSize: 18, margin: "0 0 16px" }}>📊 챕터별 상세</h2>
@@ -299,7 +295,6 @@ export default async function Page({
         </div>
       </div>
 
-      {/* 동료평가 */}
       <h2 style={{ fontSize: 18, margin: "0 0 16px" }}>
         👥 동료평가 (받은 {peerReceived.length}건 · 준 {peerGiven.length}건)
       </h2>
@@ -323,8 +318,6 @@ export default async function Page({
     </main>
   );
 }
-
-// ─── 챕터 카드 ─────────────────────────────────────────────
 
 function ChapterCard({
   chapter,
@@ -380,8 +373,6 @@ function ChapterCard({
   );
 }
 
-// ─── 면담 카드 ─────────────────────────────────────────────
-
 function InterviewCard({ iv }: { iv: InterviewRow }) {
   return (
     <details style={{ background: "#FFF", border: "1px solid #E8E8E8", borderRadius: 8, overflow: "hidden" }}>
@@ -421,8 +412,8 @@ function InterviewCard({ iv }: { iv: InterviewRow }) {
 
       <div style={{ padding: "0 16px 16px", borderTop: "1px solid #F0F0F0" }}>
         {iv.content ? (
-          <div style={{ fontSize: 13, color: "#333", whiteSpace: "pre-wrap", lineHeight: 1.7, paddingTop: 12 }}>
-            {iv.content}
+          <div style={{ color: "#333", lineHeight: 1.7, paddingTop: 12 }}>
+            <NotionContent content={iv.content} />
           </div>
         ) : (
           <div style={{ fontSize: 12, color: "#999", paddingTop: 12 }}>본문 미적재</div>
@@ -431,8 +422,6 @@ function InterviewCard({ iv }: { iv: InterviewRow }) {
     </details>
   );
 }
-
-// ─── 공통 컴포넌트 ─────────────────────────────────────────
 
 function ScoreCell({ label, peer, self, max, solo }: {
   label: string; peer: number | null; self?: number | null; max: number; solo?: boolean;

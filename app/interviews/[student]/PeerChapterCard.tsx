@@ -192,7 +192,7 @@ function PeerRow({
         <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 80 }}>
           {displayName ? (
             <Link
-              href={`/${encodeURIComponent(displayName)}`}
+              href={`/interviews/${encodeURIComponent(displayName)}`}
               style={{ color: "#3B82F6", textDecoration: "none", fontSize: 13, fontWeight: 600 }}
               onClick={(e) => e.stopPropagation()}
             >
