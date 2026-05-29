@@ -10,6 +10,7 @@ const LABELS: Record<string, string> = {
   attendanceLog: '출결(시스템)',
   condition:     '컨디션',
   peer:          '동료평가',
+  interviews:    '면담록(노션)',
 };
 
 export default function RefreshButton() {

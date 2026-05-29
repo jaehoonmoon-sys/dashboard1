@@ -16,7 +16,7 @@ const ATTEND_LOG_QID = env.REDASH_QUERY_ID_4 ?? env['redash_query_id_4'] ?? '722
 const SHEET_ID = process.env.ATTENDANCE_SHEET_ID ?? '';
 const SHEET_GID = process.env.ATTENDANCE_GID ?? '';
 const SA_EMAIL = process.env.GOOGLE_CLIENT_EMAIL ?? '';
-const SA_PKEY  = (process.env.GOOGLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n');
+const SA_PKEY  = (process.env.GOOGLE_PRIVATE_KEY ?? '').replace(/\\n/g, '\n').replace(/\r/g, '');
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -39,7 +39,8 @@ async function getGoogleToken(): Promise<string> {
   const msg = `${header}.${claim}`;
   const sign = crypto.createSign('RSA-SHA256');
   sign.update(msg);
-  const sig = sign.sign(SA_PKEY, 'base64url');
+  const privateKey = crypto.createPrivateKey({ key: SA_PKEY, format: 'pem' });
+  const sig = sign.sign(privateKey, 'base64url');
   const jwt = `${msg}.${sig}`;
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -147,6 +148,128 @@ function parseJsonField(val: unknown): unknown {
   if (val == null) return null;
   if (typeof val !== 'string') return val;
   try { return JSON.parse(val); } catch { return null; }
+}
+
+// ── 노션 면담 기록 sync ────────────────────────────────────────────────────────
+
+const NOTION_TOKEN = env.notion_api_key ?? '';
+const NOTION_DB_ID = '30b2dc3e-f514-815e-ab3a-ddceb673ed8c';
+const NOTION_VER   = '2022-06-28';
+
+type NotionRichText = Array<{ plain_text: string }>;
+type NotionBlock = { type: string } & Record<string, unknown>;
+
+function notionRichTextToStr(rt: NotionRichText): string {
+  return rt.map(t => t.plain_text).join('');
+}
+
+function blockToMd(block: NotionBlock): string {
+  const type = block.type;
+  const inner = (block[type] ?? {}) as {
+    rich_text?: NotionRichText;
+    checked?: boolean;
+    language?: string;
+  };
+  const text = notionRichTextToStr(inner.rich_text ?? []);
+  switch (type) {
+    case 'paragraph':          return text ? `${text}\n` : '\n';
+    case 'heading_1':          return `# ${text}\n`;
+    case 'heading_2':          return `## ${text}\n`;
+    case 'heading_3':          return `### ${text}\n`;
+    case 'bulleted_list_item': return `- ${text}\n`;
+    case 'numbered_list_item': return `1. ${text}\n`;
+    case 'to_do':              return `- [${inner.checked ? 'x' : ' '}] ${text}\n`;
+    case 'quote':              return `> ${text}\n`;
+    case 'code':               return `\`\`\`${inner.language ?? ''}\n${text}\n\`\`\`\n`;
+    case 'divider':            return '---\n';
+    case 'callout':            return `> ${text}\n`;
+    case 'toggle':             return text ? `${text}\n` : '';
+    default:                   return text ? `${text}\n` : '';
+  }
+}
+
+async function notionFetchPages(since?: string): Promise<Array<{ id: string; properties: Record<string, unknown> }>> {
+  const pages: Array<{ id: string; properties: Record<string, unknown> }> = [];
+  let cursor: string | undefined;
+  while (true) {
+    const body: Record<string, unknown> = { page_size: 100 };
+    if (cursor) body.start_cursor = cursor;
+    if (since) {
+      body.filter = {
+        timestamp: 'last_edited_time',
+        last_edited_time: { after: since },
+      };
+    }
+    const res = await fetch(`https://api.notion.com/v1/databases/${NOTION_DB_ID}/query`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${NOTION_TOKEN}`,
+        'Notion-Version': NOTION_VER,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+    });
+    if (!res.ok) throw new Error(`Notion DB query HTTP ${res.status}`);
+    const data = await res.json() as {
+      results: Array<{ id: string; properties: Record<string, unknown> }>;
+      has_more: boolean;
+      next_cursor?: string;
+    };
+    pages.push(...data.results);
+    if (!data.has_more) break;
+    cursor = data.next_cursor;
+  }
+  return pages;
+}
+
+async function notionFetchPageContent(pageId: string): Promise<string> {
+  const res = await fetch(`https://api.notion.com/v1/blocks/${pageId}/children?page_size=100`, {
+    headers: {
+      'Authorization': `Bearer ${NOTION_TOKEN}`,
+      'Notion-Version': NOTION_VER,
+    },
+    cache: 'no-store',
+  });
+  if (!res.ok) return '';
+  const data = await res.json() as { results: NotionBlock[] };
+  return data.results.map(blockToMd).join('');
+}
+
+function notionExtractProps(properties: Record<string, unknown>) {
+  const rt = (p: unknown): string | null => {
+    const prop = p as Record<string, unknown> | null;
+    if (!prop) return null;
+    const items = (prop.rich_text ?? prop.title ?? []) as NotionRichText;
+    const val = items.map(t => t.plain_text).join('');
+    return val || null;
+  };
+  const dateStart = (p: unknown): string | null => {
+    const prop = p as Record<string, unknown> | null;
+    return (prop?.date as Record<string, string> | null)?.start ?? null;
+  };
+  const sel = (p: unknown): string | null => {
+    const prop = p as Record<string, unknown> | null;
+    return (prop?.select as Record<string, string> | null)?.name ?? null;
+  };
+  const multiSel = (p: unknown): string[] => {
+    const prop = p as Record<string, unknown> | null;
+    return ((prop?.multi_select as Array<{ name: string }> | null) ?? []).map(s => s.name);
+  };
+  const people = (p: unknown): string | null => {
+    const prop = p as Record<string, unknown> | null;
+    const names = ((prop?.people as Array<{ name: string }> | null) ?? [])
+      .map(u => u.name).filter((n): n is string => !!n);
+    return names.length ? names.join(', ') : null;
+  };
+  return {
+    student_name:   rt(properties['수강생']),
+    interview_date: dateStart(properties['면담일자']),
+    chapter:        sel(properties['챕터']),
+    summary:        rt(properties['요약']),
+    types:          multiSel(properties['유형']),
+    interviewer:    people(properties['면담자']),
+  };
 }
 
 // ── POST /api/refresh ─────────────────────────────────────────────────────────
@@ -285,6 +408,33 @@ export async function POST() {
       : { ok: true, upserted: records.length };
   } catch (e) {
     results.peer = { error: String(e) };
+  }
+
+  // 5. 노션 면담 기록 → mj_interview_records
+  try {
+    const { data: lastRow } = await supabase
+      .from('mj_interview_records')
+      .select('synced_at')
+      .order('synced_at', { ascending: false })
+      .limit(1)
+      .single();
+    const lastSync = lastRow?.synced_at as string | undefined;
+    const pages = await notionFetchPages(lastSync);
+    const now = new Date().toISOString();
+    let upserted = 0;
+    for (const page of pages) {
+      const notionUrl = 'https://www.notion.so/' + page.id.replace(/-/g, '');
+      const props = notionExtractProps(page.properties);
+      const content = await notionFetchPageContent(page.id);
+      const { error } = await supabase
+        .from('mj_interview_records')
+        .upsert({ notion_url: notionUrl, content, synced_at: now, ...props }, { onConflict: 'notion_url' });
+      if (error) throw new Error(error.message);
+      upserted++;
+    }
+    results.interviews = { ok: true, upserted };
+  } catch (e) {
+    results.interviews = { error: String(e) };
   }
 
   const hasError = Object.values(results).some(r => (r as Record<string, unknown>).error);
