@@ -188,8 +188,10 @@ function blockToMd(block: NotionBlock): string {
   }
 }
 
-async function notionFetchPages(since?: string): Promise<Array<{ id: string; properties: Record<string, unknown> }>> {
-  const pages: Array<{ id: string; properties: Record<string, unknown> }> = [];
+type NotionPage = { id: string; last_edited_time: string; properties: Record<string, unknown> };
+
+async function notionFetchPages(since?: string): Promise<NotionPage[]> {
+  const pages: NotionPage[] = [];
   let cursor: string | undefined;
   while (true) {
     const body: Record<string, unknown> = { page_size: 100 };
@@ -212,7 +214,7 @@ async function notionFetchPages(since?: string): Promise<Array<{ id: string; pro
     });
     if (!res.ok) throw new Error(`Notion DB query HTTP ${res.status}`);
     const data = await res.json() as {
-      results: Array<{ id: string; properties: Record<string, unknown> }>;
+      results: NotionPage[];
       has_more: boolean;
       next_cursor?: string;
     };
@@ -420,11 +422,36 @@ export async function POST() {
       .single();
     const lastSync = lastRow?.synced_at as string | undefined;
     const pages = await notionFetchPages(lastSync);
+
+    // (student_name, interview_date) 기준 중복 제거 — 같은 면담이 Notion에 여러 페이지로 존재할 경우
+    // last_edited_time이 최신인 페이지 하나만 남김
+    const latestById = new Map<string, NotionPage>();
+    for (const page of pages) {
+      const props = notionExtractProps(page.properties);
+      const key = `${props.student_name ?? ''}__${props.interview_date ?? ''}`;
+      const existing = latestById.get(key);
+      if (!existing || page.last_edited_time > existing.last_edited_time) {
+        latestById.set(key, page);
+      }
+    }
+    const selectedPages = Array.from(latestById.values());
+
     const now = new Date().toISOString();
     let upserted = 0;
-    for (const page of pages) {
+    for (const page of selectedPages) {
       const notionUrl = 'https://www.notion.so/' + page.id.replace(/-/g, '');
       const props = notionExtractProps(page.properties);
+
+      // DB에 같은 student+date지만 다른 notion_url인 잔여 중복 레코드 제거
+      if (props.student_name && props.interview_date) {
+        await supabase
+          .from('mj_interview_records')
+          .delete()
+          .eq('student_name', props.student_name)
+          .eq('interview_date', props.interview_date)
+          .neq('notion_url', notionUrl);
+      }
+
       const content = await notionFetchPageContent(page.id);
       const { error } = await supabase
         .from('mj_interview_records')
