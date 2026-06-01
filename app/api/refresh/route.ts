@@ -6,6 +6,8 @@ const REDASH_BASE = (process.env.REDASH_BASE_URL ?? 'https://redash-v2.spartacod
 const env = process.env as Record<string, string | undefined>;
 
 // Redash 키
+const EVAL_KEY       = env.REDASH_API_KEY ?? '';
+const EVAL_QID       = env.REDASH_QUERY_ID ?? env['redash_query_id'] ?? '7200';
 const COND_KEY       = env.REDASH_API_KEY_2 ?? env['redash-api-key-2'] ?? '';
 const PEER_KEY       = env.REDASH_API_KEY_3 ?? env['redash-api-key-3'] ?? '';
 const USER_KEY       = env.REDASH_USER_API_KEY ?? env['redash_user_api_key'] ?? '';
@@ -278,6 +280,50 @@ function notionExtractProps(properties: Record<string, unknown>) {
 
 export async function POST() {
   const results: Record<string, unknown> = {};
+
+  // 0. Redash 다면평가(7200) → mj_evaluations
+  try {
+    const rows = await fetchRedashWithRefresh(EVAL_QID, EVAL_KEY);
+    const now = new Date().toISOString();
+    const records = rows
+      .filter(r => r['이름'] && r['기수명'])
+      .map(r => ({
+        cohort:                    r['기수명']              as string,
+        student_name:              r['이름']                as string,
+        chapter:                   r['챕터']                as string | null,
+        team_no:                   r['팀 번호']             as number | null,
+        role:                      r['역할']                as string | null,
+        peer_communication:        r['소통']                as number | null,
+        self_communication:        r['자평_소통점수']       as number | null,
+        peer_skill:                r['실력']                as number | null,
+        self_skill:                r['자평_실력점수']       as number | null,
+        peer_growth:               r['성장']                as number | null,
+        self_growth:               r['자평_성장점수']       as number | null,
+        peer_immersion:            r['몰입']                as number | null,
+        self_immersion:            r['자평_몰입점수']       as number | null,
+        difficulty:                r['난이도']              as number | null,
+        self_comment_comm_immerse: r['자평_소통/몰입코멘트'] as string | null,
+        self_comment_skill_growth: r['자평_실력/성장코멘트'] as string | null,
+        nps_score:                 r['NPS_점수']            as number | null,
+        nps_comment:               r['NPS_코멘트']          as string | null,
+        ops_satisfaction:          r['운영_만족도']         as number | null,
+        ops_satisfaction_comment:  r['운영_만족도_코멘트']  as string | null,
+        submitted_at:              r['제출일시']            as string | null,
+        synced_at:                 now,
+      }));
+
+    let upserted = 0;
+    for (let i = 0; i < records.length; i += 200) {
+      const { error } = await supabase
+        .from('mj_evaluations')
+        .upsert(records.slice(i, i + 200), { onConflict: 'cohort,student_name,chapter,submitted_at' });
+      if (error) throw new Error(error.message);
+      upserted += Math.min(200, records.length - i);
+    }
+    results.evaluations = { ok: true, upserted };
+  } catch (e) {
+    results.evaluations = { error: String(e) };
+  }
 
   // 1. 구글시트 출결 → mj_attendance
   try {
