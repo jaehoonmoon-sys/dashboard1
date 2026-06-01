@@ -67,7 +67,7 @@ export default async function Page() {
       >
         <Stat label="전체 수강생" value={students.length} accent="#1A1A1A" />
         <Stat label="심각 1개+ 보유" value={critical.length} accent="#DC2626" />
-        <Stat label="높음만 (심각 X)" value={high.length} accent="#F59E0B" />
+        <Stat label="낮음 1개+ (심각 없음)" value={high.length} accent="#F59E0B" />
       </section>
 
       <DashboardTable

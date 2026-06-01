@@ -53,22 +53,33 @@ export default function RefreshButton() {
       </button>
 
       {items && (
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {Object.entries(items)
-            .filter(([k]) => k !== '_error')
-            .map(([key, v]) => (
-              <span key={key} style={{
-                fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 600,
-                background: v.ok ? '#DCFCE7' : '#FEE2E2',
-                color: v.ok ? '#16A34A' : '#DC2626',
-                border: `1px solid ${v.ok ? '#BBF7D0' : '#FECACA'}`,
-              }}>
-                {LABELS[key] ?? key}
-                {v.ok ? ` ✓ ${v.upserted}건` : ` ✗ ${v.error?.slice(0, 30)}`}
-              </span>
-            ))
-          }
-        </div>
+        <>
+          {items._error && (
+            <p style={{ fontSize: 11, color: '#DC2626', margin: 0 }}>
+              네트워크 오류: {items._error.error}
+            </p>
+          )}
+          {Object.keys(items).some((k) => k !== '_error') && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {Object.entries(items)
+                .filter(([k]) => k !== '_error')
+                .map(([key, v]) => (
+                  <span key={key} style={{
+                    fontSize: 11, padding: '3px 10px', borderRadius: 12, fontWeight: 600,
+                    background: v.ok ? '#DCFCE7' : '#FEE2E2',
+                    color: v.ok ? '#16A34A' : '#DC2626',
+                    border: `1px solid ${v.ok ? '#BBF7D0' : '#FECACA'}`,
+                  }}>
+                    {LABELS[key] ?? key}
+                    {v.ok
+                      ? v.upserted === 0 ? ' ✓ 변경없음' : ` ✓ ${v.upserted}건`
+                      : ` ✗ ${v.error?.slice(0, 30)}`}
+                  </span>
+                ))
+              }
+            </div>
+          )}
+        </>
       )}
 
       {loading && (

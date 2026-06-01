@@ -206,14 +206,17 @@ export default function DashboardTable({
                   >
                     {s.student_name}
                   </Link>
-                  {todayConditions.has(s.student_name) && (
-                    <span
-                      title={`오늘 컨디션: ${COND_EMOJI[todayConditions.get(s.student_name)!]}`}
-                      style={{ marginLeft: 6, fontSize: 15 }}
-                    >
-                      {COND_EMOJI[todayConditions.get(s.student_name)!]}
-                    </span>
-                  )}
+                  {(() => {
+                    const condScore = todayConditions.get(s.student_name);
+                    return condScore != null && COND_EMOJI[condScore] ? (
+                      <span
+                        title={`오늘 컨디션: ${COND_EMOJI[condScore]}`}
+                        style={{ marginLeft: 6, fontSize: 15 }}
+                      >
+                        {COND_EMOJI[condScore]}
+                      </span>
+                    ) : null;
+                  })()}
                 </td>
                 <td style={{ padding: "12px 14px", fontSize: 13, color: "#666" }}>
                   디마 5기

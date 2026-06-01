@@ -17,7 +17,13 @@ export type ChartPoint = {
   sysAbsent: number;
 };
 
-function CustomTooltip({ active, payload, label }: any) {
+type TooltipEntry = { dataKey: string; name: string; value: number; color: string };
+
+function CustomTooltip({ active, payload, label }: {
+  active?: boolean;
+  payload?: TooltipEntry[];
+  label?: string;
+}) {
   if (!active || !payload || !payload.length) return null;
   return (
     <div style={{
@@ -25,7 +31,7 @@ function CustomTooltip({ active, payload, label }: any) {
       padding: "10px 14px", fontSize: 13, boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
     }}>
       <div style={{ fontWeight: 600, color: "#555", marginBottom: 6 }}>{label}</div>
-      {payload.map((p: any) => (
+      {payload.map((p) => (
         <div key={p.dataKey} style={{ color: p.color, marginBottom: 2 }}>
           {p.name}: <strong>{p.value}명</strong>
         </div>
@@ -40,6 +46,13 @@ function CustomTooltip({ active, payload, label }: any) {
 }
 
 export default function AttendanceChart({ data }: { data: ChartPoint[] }) {
+  if (data.length === 0) {
+    return (
+      <div style={{ width: "100%", height: 300, display: "flex", alignItems: "center", justifyContent: "center", color: "#BBB", fontSize: 14 }}>
+        비교 데이터 없음
+      </div>
+    );
+  }
   const maxVal = Math.max(...data.map(d => Math.max(d.sheetAbsent, d.sysAbsent)), 1);
 
   return (

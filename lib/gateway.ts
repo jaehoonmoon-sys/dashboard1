@@ -10,17 +10,17 @@
  *   Claude Code가 자동으로 이 helper를 사용한다.
  */
 
-const URL = process.env.HACKATHON_GATEWAY_URL || "";
+const GATEWAY_URL = process.env.HACKATHON_GATEWAY_URL || "";
 const TOKEN = process.env.HACKATHON_GATEWAY_TOKEN || "";
 
 export async function gateway<T = unknown>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  if (!URL || !TOKEN) {
+  if (!GATEWAY_URL || !TOKEN) {
     throw new Error("HACKATHON_GATEWAY_URL · HACKATHON_GATEWAY_TOKEN 누락 (.env)");
   }
-  const resp = await fetch(`${URL}${path}`, {
+  const resp = await fetch(`${GATEWAY_URL}${path}`, {
     ...init,
     headers: {
       Authorization: `Bearer ${TOKEN}`,

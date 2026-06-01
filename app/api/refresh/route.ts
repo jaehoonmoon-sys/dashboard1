@@ -228,16 +228,24 @@ async function notionFetchPages(since?: string): Promise<NotionPage[]> {
 }
 
 async function notionFetchPageContent(pageId: string): Promise<string> {
-  const res = await fetch(`https://api.notion.com/v1/blocks/${pageId}/children?page_size=100`, {
-    headers: {
-      'Authorization': `Bearer ${NOTION_TOKEN}`,
-      'Notion-Version': NOTION_VER,
-    },
-    cache: 'no-store',
-  });
-  if (!res.ok) return '';
-  const data = await res.json() as { results: NotionBlock[] };
-  return data.results.map(blockToMd).join('');
+  const blocks: NotionBlock[] = [];
+  let cursor: string | undefined;
+  while (true) {
+    const qs = cursor ? `?page_size=100&start_cursor=${encodeURIComponent(cursor)}` : '?page_size=100';
+    const res = await fetch(`https://api.notion.com/v1/blocks/${pageId}/children${qs}`, {
+      headers: {
+        'Authorization': `Bearer ${NOTION_TOKEN}`,
+        'Notion-Version': NOTION_VER,
+      },
+      cache: 'no-store',
+    });
+    if (!res.ok) break;
+    const data = await res.json() as { results: NotionBlock[]; has_more: boolean; next_cursor?: string };
+    blocks.push(...data.results);
+    if (!data.has_more) break;
+    cursor = data.next_cursor;
+  }
+  return blocks.map(blockToMd).join('');
 }
 
 function notionExtractProps(properties: Record<string, unknown>) {
@@ -425,10 +433,15 @@ export async function POST() {
         logged_at:      r['createdat'] as string | null,
         mongo_id:       r['_id'] as string,
       }));
-    const { error } = await supabase.from('mj_condition_logs').upsert(records, { onConflict: 'mongo_id' });
-    results.condition = error
-      ? { error: error.message }
-      : { ok: true, upserted: records.length };
+    let upserted = 0;
+    for (let i = 0; i < records.length; i += 200) {
+      const { error } = await supabase
+        .from('mj_condition_logs')
+        .upsert(records.slice(i, i + 200), { onConflict: 'mongo_id' });
+      if (error) throw new Error(error.message);
+      upserted += Math.min(200, records.length - i);
+    }
+    results.condition = { ok: true, upserted };
   } catch (e) {
     results.condition = { error: String(e) };
   }
@@ -450,10 +463,15 @@ export async function POST() {
       immerse_growth_comment:r['실력/성장_코멘트']  as string | null,
       submitted_at:          r['평가일시']          as string | null,
     }));
-    const { error } = await supabase.from('mj_peer_comments').upsert(records, { onConflict: 'evaluator_name,evaluated_name,chapter' });
-    results.peer = error
-      ? { error: error.message }
-      : { ok: true, upserted: records.length };
+    let upserted = 0;
+    for (let i = 0; i < records.length; i += 200) {
+      const { error } = await supabase
+        .from('mj_peer_comments')
+        .upsert(records.slice(i, i + 200), { onConflict: 'evaluator_name,evaluated_name,chapter' });
+      if (error) throw new Error(error.message);
+      upserted += Math.min(200, records.length - i);
+    }
+    results.peer = { ok: true, upserted };
   } catch (e) {
     results.peer = { error: String(e) };
   }

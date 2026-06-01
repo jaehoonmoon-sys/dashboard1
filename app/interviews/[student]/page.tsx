@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { supabase } from "../../../lib/supabase";
+import { CHAPTERS, CHAPTER_END, dateToChapterOrder } from "../../../lib/curriculum";
 import TimelineChart, { ConditionPoint } from "./TimelineChart";
 import ConditionCalendar, { ConditionLog } from "./ConditionCalendar";
 import PeerChapterCard, { PeerComment } from "./PeerChapterCard";
 import { NotionContent } from "./NotionContent";
+
+const CURRICULUM = CHAPTERS.map((ch) => ({ order: ch.order, name: ch.fullName, period: ch.period }));
 
 export const dynamic = "force-dynamic";
 
@@ -54,46 +57,12 @@ type ConditionRow = {
   logged_at: string | null;
 };
 
-const CURRICULUM = [
-  { order: 0, name: "CH.0 온보딩", period: "4/20 ~ 4/24" },
-  { order: 1, name: "CH.1 마케팅 입문", period: "4/27 ~ 5/12" },
-  { order: 2, name: "CH.2 기초 프로젝트", period: "5/13 ~ 5/19" },
-  { order: 3, name: "CH.3 마케팅 숙련", period: "5/20 ~ 6/11" },
-  { order: 4, name: "CH.4 심화 프로젝트", period: "6/12 ~ 6/25" },
-  { order: 5, name: "CH.5 마케팅 심화", period: "6/26 ~ 7/9" },
-  { order: 6, name: "CH.6 실전 프로젝트", period: "7/10 ~ 7/16" },
-  { order: 7, name: "CH.7 고객 데이터", period: "7/20 ~ 7/28" },
-  { order: 8, name: "CH.8 그로스 마케팅", period: "7/29 ~ 8/11" },
-  { order: 9, name: "CH.9 최종 프로젝트", period: "8/12 ~ 9/8" },
-];
-
-const CHAPTER_END: Record<number, string> = {
-  0: "2026-04-24", 1: "2026-05-12", 2: "2026-05-19",
-  3: "2026-06-11", 4: "2026-06-25", 5: "2026-07-09",
-  6: "2026-07-16", 7: "2026-07-28", 8: "2026-08-11", 9: "2026-09-08",
-};
-
 const TYPE_COLOR: Record<string, string> = {
   "하차 희망": "#DC2626", 고관여자면담: "#DC2626", 방향성고민: "#8B5CF6",
   팀플진행: "#3B82F6", 과제수행: "#EC4899", 포트폴리오: "#92400E",
   취업방향: "#F59E0B", 단순질의: "#9CA3AF", TIL: "#3B82F6",
   과제피드백: "#9CA3AF", SNS채널: "#10B981",
 };
-
-function dateToChapterOrder(date: string): number {
-  const d = date.slice(0, 10);
-  if (d < "2026-04-20") return 0;
-  if (d <= "2026-04-26") return 0;
-  if (d <= "2026-05-12") return 1;
-  if (d <= "2026-05-19") return 2;
-  if (d <= "2026-06-11") return 3;
-  if (d <= "2026-06-25") return 4;
-  if (d <= "2026-07-09") return 5;
-  if (d <= "2026-07-19") return 6;
-  if (d <= "2026-07-28") return 7;
-  if (d <= "2026-08-11") return 8;
-  return 9;
-}
 
 export default async function Page({
   params,
@@ -431,7 +400,12 @@ function ScoreCell({ label, peer, self, max, solo }: {
     <div style={{ background: "#F9FAFB", borderRadius: 6, padding: "10px 12px", textAlign: "center" }}>
       <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, color }}>
-        {peer != null ? peer.toFixed(1) : "—"}
+        {peer != null ? (
+          <>
+            {peer.toFixed(1)}
+            <span style={{ fontSize: 11, color: "#AAA", fontWeight: 400 }}>/{max}</span>
+          </>
+        ) : "—"}
       </div>
       {!solo && self != null && (
         <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>자평 {self.toFixed(1)}</div>

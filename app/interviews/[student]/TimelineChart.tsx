@@ -1,6 +1,7 @@
 "use client";
 
 import { NotionContent } from "./NotionContent";
+import { CHAPTERS } from "../../../lib/curriculum";
 import {
   Line,
   XAxis,
@@ -12,20 +13,6 @@ import {
   Scatter,
   ComposedChart,
 } from "recharts";
-
-// 챕터 경계 (디마5기 기준)
-const CHAPTER_BOUNDS = [
-  { order: 0, name: "CH.0", start: "2026-04-20", end: "2026-04-24" },
-  { order: 1, name: "CH.1", start: "2026-04-27", end: "2026-05-12" },
-  { order: 2, name: "CH.2", start: "2026-05-13", end: "2026-05-19" },
-  { order: 3, name: "CH.3", start: "2026-05-20", end: "2026-06-11" },
-  { order: 4, name: "CH.4", start: "2026-06-12", end: "2026-06-25" },
-  { order: 5, name: "CH.5", start: "2026-06-26", end: "2026-07-09" },
-  { order: 6, name: "CH.6", start: "2026-07-10", end: "2026-07-16" },
-  { order: 7, name: "CH.7", start: "2026-07-20", end: "2026-07-28" },
-  { order: 8, name: "CH.8", start: "2026-07-29", end: "2026-08-11" },
-  { order: 9, name: "CH.9", start: "2026-08-12", end: "2026-09-08" },
-];
 
 const CHAPTER_BG = [
   "#FAFAFA",
@@ -112,11 +99,19 @@ export default function TimelineChart({
       kind: "condition" as const,
     }));
 
-  // X축 도메인: 디마5기 전체 기간
-  const xMin = toTs("2026-04-20");
-  const xMax = toTs("2026-09-08");
+  // X축 도메인: 챕터 전체 기간
+  const xMin = toTs(CHAPTERS[0].start);
+  const xMax = toTs(CHAPTERS[CHAPTERS.length - 1].end);
 
   const hasCondition = condData.length > 0;
+
+  if (evalData.length === 0 && condData.length === 0) {
+    return (
+      <div style={{ height: 380, display: "flex", alignItems: "center", justifyContent: "center", color: "#BBB", fontSize: 14 }}>
+        평가 데이터 없음
+      </div>
+    );
+  }
 
   return (
     <div style={{ width: "100%", height: 380, marginBottom: 24 }}>
@@ -124,7 +119,7 @@ export default function TimelineChart({
         <ComposedChart margin={{ top: 16, right: hasCondition ? 48 : 24, bottom: 32, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#EEE" vertical={false} />
 
-          {CHAPTER_BOUNDS.map((ch, i) => (
+          {CHAPTERS.map((ch, i) => (
             <ReferenceArea
               key={ch.order}
               x1={toTs(ch.start)}
@@ -151,7 +146,7 @@ export default function TimelineChart({
               const d = new Date(ts);
               return `${d.getMonth() + 1}/${d.getDate()}`;
             }}
-            ticks={CHAPTER_BOUNDS.map((c) => toTs(c.end))}
+            ticks={CHAPTERS.map((c) => toTs(c.end))}
             tick={{ fontSize: 11, fill: "#666" }}
             stroke="#CCC"
             scale="time"
@@ -227,7 +222,7 @@ export default function TimelineChart({
             yAxisId="main"
             dataKey="interview_y"
             fill="#10B981"
-            shape={(props: any) => (
+            shape={(props: { cx: number; cy: number }) => (
               <g>
                 <line
                   x1={props.cx}
@@ -292,7 +287,24 @@ function LegendDot({ color, label, dashed }: { color: string; label: string; das
   );
 }
 
-function CustomTooltip({ active, payload }: any) {
+type TooltipPayloadItem = {
+  payload?: {
+    kind?: 'eval' | 'interview' | 'condition';
+    date: string;
+    chapter?: string | null;
+    nps?: number | null;
+    ops?: number | null;
+    nps_comment?: string | null;
+    ops_comment?: string | null;
+    cond?: number | null;
+    content?: string | null;
+    contact_request?: boolean;
+    types?: string[];
+    summary?: string | null;
+  };
+};
+
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayloadItem[] }) {
   if (!active || !payload || !payload.length) return null;
 
   const p = payload[0]?.payload;

@@ -12,16 +12,25 @@ export type ConditionLog = {
 const SCORE_COLOR = ["#DC2626", "#F97316", "#FBBF24", "#84CC16", "#22C55E"];
 const SCORE_LABEL = ["매우 힘들어요", "힘들어요", "보통", "좋아요", "아주 좋아요"];
 
-const MONTHS = [
-  { year: 2026, month: 4 },
-  { year: 2026, month: 5 },
-  { year: 2026, month: 6 },
-  { year: 2026, month: 7 },
-  { year: 2026, month: 8 },
-  { year: 2026, month: 9 },
-];
+function deriveMonths(logs: ConditionLog[]): { year: number; month: number }[] {
+  const yearMonths = logs
+    .filter((l) => l.logged_at)
+    .map((l) => l.logged_at!.slice(0, 7));
+  if (yearMonths.length === 0) return [];
+  const uniq = [...new Set(yearMonths)].sort();
+  const [minY, minM] = uniq[0].split("-").map(Number);
+  const [maxY, maxM] = uniq[uniq.length - 1].split("-").map(Number);
+  const result: { year: number; month: number }[] = [];
+  let y = minY, m = minM;
+  while (y < maxY || (y === maxY && m <= maxM)) {
+    result.push({ year: y, month: m });
+    if (++m > 12) { m = 1; y++; }
+  }
+  return result;
+}
 
 export default function ConditionCalendar({ logs }: { logs: ConditionLog[] }) {
+  const months = deriveMonths(logs);
   const [tooltip, setTooltip] = useState<{
     dateStr: string;
     log: ConditionLog;
@@ -64,6 +73,15 @@ export default function ConditionCalendar({ logs }: { logs: ConditionLog[] }) {
           }} />
           기록 없음
         </span>
+        <span style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: "#555" }}>
+          <span style={{
+            position: "relative", width: 10, height: 10, borderRadius: 2,
+            background: "#22C55E", display: "inline-block", flexShrink: 0,
+          }}>
+            <span style={{ position: "absolute", top: 1, right: 1, width: 3, height: 3, borderRadius: "50%", background: "#FFF" }} />
+          </span>
+          흰 점 = 상담 신청
+        </span>
       </div>
 
       {logs.length === 0 && (
@@ -73,7 +91,7 @@ export default function ConditionCalendar({ logs }: { logs: ConditionLog[] }) {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {MONTHS.map(({ year, month }) => (
+        {months.map(({ year, month }) => (
           <MonthGrid
             key={`${year}-${month}`}
             year={year}
@@ -204,7 +222,9 @@ function MonthGrid({
                   ? (e) => {
                       const rect = e.currentTarget.getBoundingClientRect();
                       const x = rect.right + 236 > window.innerWidth ? rect.left - 244 : rect.right;
-                      onHover(dateStr, log, x, rect.top);
+                      const tooltipH = 180;
+                      const y = rect.top + tooltipH > window.innerHeight ? rect.top - tooltipH : rect.top;
+                      onHover(dateStr, log, x, y);
                     }
                   : undefined
               }

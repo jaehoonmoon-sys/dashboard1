@@ -76,18 +76,16 @@ export default function PeerChapterCard({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 700 }}>{chapter}</div>
-          {teamNo && (
-            <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>
-              팀 {teamNo} · 받은 평가 {received.length}건 · 내가 준 평가 {given.length}건
-            </div>
-          )}
+          <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>
+            {teamNo ? `팀 ${teamNo} · ` : ""}받은 평가 {received.length}건 · 내가 준 평가 {given.length}건
+          </div>
         </div>
         <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
           {received.length > 0 && (
             <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
               {([["소통", avgComm], ["실력", avgSkill], ["몰입", avgImmerse], ["성장", avgGrowth]] as [string, number | null][]).map(([label, val]) => (
                 <span key={label} style={{ color: val != null ? riskColor(val as number, 7) : "#BBB" }}>
-                  {label} {val != null ? (val as number).toFixed(1) : "—"}
+                  {label} {val != null ? `${(val as number).toFixed(1)}/7` : "—"}
                 </span>
               ))}
             </div>
@@ -212,7 +210,7 @@ function PeerRow({
         <div style={{ display: "flex", gap: 10, flex: 1, flexWrap: "wrap" }}>
           {scores.map(({ label, val, max }) => (
             <span key={label} style={{ fontSize: 12, color: val != null ? riskColor(val, max) : "#BBB" }}>
-              {label} <strong>{val != null ? val.toFixed(1) : "—"}</strong>
+              {label} <strong>{val != null ? `${val.toFixed(1)}/${max}` : "—"}</strong>
             </span>
           ))}
         </div>

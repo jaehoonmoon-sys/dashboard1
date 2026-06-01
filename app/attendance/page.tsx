@@ -127,8 +127,8 @@ export default async function Page() {
 
       {/* 요약 카드 */}
       <section style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 36 }}>
-        <StatCard label="PM 시트 평균 결석률" value={`${avgSheetRate.toFixed(1)}%`} accent="#2563EB" />
-        <StatCard label="시스템 평균 결석률" value={`${avgSysRate.toFixed(1)}%`} accent="#F59E0B" />
+        <StatCard label="PM 시트 평균 결석률" value={`${avgSheetRate.toFixed(1)}%`} accent="#2563EB" sub={`비교 가능 ${comparableDays.length}일 기준`} />
+        <StatCard label="시스템 평균 결석률" value={`${avgSysRate.toFixed(1)}%`} accent="#F59E0B" sub={`비교 가능 ${comparableDays.length}일 기준`} />
         <StatCard
           label="최대 차이 날짜"
           value={maxDeltaDay ? maxDeltaDay.date.slice(5) : "—"}
@@ -137,6 +137,12 @@ export default async function Page() {
         />
         <StatCard label="불일치 발생일" value={`${totalDiscrepancyDays}일`} accent="#8B5CF6" />
       </section>
+
+      {comparisons.length === 0 && (
+        <p style={{ color: "#BBB", fontSize: 14, textAlign: "center", padding: "40px 0" }}>
+          출결 데이터 없음
+        </p>
+      )}
 
       {/* 차트 */}
       <section style={{ background: "#FFF", border: "1px solid #E8E8E8", borderRadius: 8, padding: "20px 16px 16px", marginBottom: 36 }}>
