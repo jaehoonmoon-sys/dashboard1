@@ -155,15 +155,15 @@ export default async function Page({
   const profile = (profileRes.data ?? null) as StudentProfile | null;
   const lectureProgress = (lectureRes.data as unknown as LectureProgress[]) ?? [];
 
-  // 챕터 코드별 강의 진도 그룹핑
-  const lectureByChapter = new Map<string, LectureProgress[]>();
+  // chapter_code("CH.0") → order(0) 매핑 후, order 키로 그룹핑
+  const codeToOrder = new Map(CHAPTERS.map((ch) => [ch.name, ch.order]));
+  const lectureByChapter = new Map<number, LectureProgress[]>();
   for (const lp of lectureProgress) {
-    const code = lp.mj_courses?.chapter_code ?? "기타";
-    if (!lectureByChapter.has(code)) lectureByChapter.set(code, []);
-    lectureByChapter.get(code)!.push(lp);
+    const order = codeToOrder.get(lp.mj_courses?.chapter_code ?? "");
+    if (order == null) continue;
+    if (!lectureByChapter.has(order)) lectureByChapter.set(order, []);
+    lectureByChapter.get(order)!.push(lp);
   }
-  // CH.N → order 매핑 (CHAPTERS의 name 컬럼: 'CH.0', 'CH.1' ...)
-  const chapterCodeToOrder = new Map(CHAPTERS.map((ch) => [ch.name, ch.order]));
 
   const byChapter = new Map<number, TimelineRow>();
   for (const t of timeline) {
@@ -293,7 +293,7 @@ export default async function Page({
             {CURRICULUM.map((ch) => {
               const data = byChapter.get(ch.order);
               const chInterviews = interviewsByChapter.get(ch.order) ?? [];
-              const chLecture = lectureByChapter.get(ch.name) ?? [];
+              const chLecture = lectureByChapter.get(ch.order) ?? [];
               return (
                 <div key={ch.order}>
                   <ChapterCard chapter={ch} data={data} lectures={chLecture} />
