@@ -13,7 +13,8 @@ export default async function Page() {
     supabase
       .from("mj_student_summary")
       .select("*")
-      .eq("cohort", "AI 기반 디지털 마케팅 부트캠프 5회차"),
+      .eq("cohort", "AI 기반 디지털 마케팅 부트캠프 5회차")
+      .eq("is_active", true),
     supabase.from("mj_student_interview_stats").select("*"),
     supabase
       .from("mj_condition_logs")

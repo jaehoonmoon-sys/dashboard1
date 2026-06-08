@@ -57,6 +57,28 @@ type ConditionRow = {
   logged_at: string | null;
 };
 
+type StudentProfile = {
+  birthday: string | null;
+  gender: string | null;
+  occupation: string | null;
+  experience_level: string | null;
+  join_reference: string | null;
+  join_painpoint: string | null;
+  join_needs: string | null;
+};
+
+type LectureProgress = {
+  progress_rate: number;
+  is_completed: boolean;
+  course_id: number;
+  mj_courses: {
+    id: number;
+    name: string;
+    chapter_code: string;
+    hours: number | null;
+  } | null;
+};
+
 const TYPE_COLOR: Record<string, string> = {
   "하차 희망": "#DC2626", 고관여자면담: "#DC2626", 방향성고민: "#8B5CF6",
   팀플진행: "#3B82F6", 과제수행: "#EC4899", 포트폴리오: "#92400E",
@@ -72,7 +94,15 @@ export default async function Page({
   const { student } = await params;
   const studentName = decodeURIComponent(student);
 
-  const [tlRes, intvRes, peerRecRes, peerGivRes, condRes] = await Promise.all([
+  // 먼저 student_id를 가져온 뒤 profile · lecture 조회에 사용
+  const studentRes = await supabase
+    .from("mj_students")
+    .select("id")
+    .eq("student_name", studentName)
+    .maybeSingle();
+  const studentId = studentRes.data?.id ?? null;
+
+  const [tlRes, intvRes, peerRecRes, peerGivRes, condRes, profileRes, lectureRes] = await Promise.all([
     supabase
       .from("mj_student_timeline")
       .select("*")
@@ -101,6 +131,20 @@ export default async function Page({
       .select("*")
       .eq("student_name", studentName)
       .order("logged_at", { ascending: true }),
+    studentId
+      ? supabase
+          .from("mj_student_profiles")
+          .select("birthday,gender,occupation,experience_level,join_reference,join_painpoint,join_needs")
+          .eq("student_id", studentId)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    studentId
+      ? supabase
+          .from("mj_lecture_progress")
+          .select("progress_rate, is_completed, course_id, mj_courses(id, name, chapter_code, hours)")
+          .eq("student_id", studentId)
+          .order("course_id")
+      : Promise.resolve({ data: [] }),
   ]);
 
   const timeline = (tlRes.data ?? []) as TimelineRow[];
@@ -108,6 +152,18 @@ export default async function Page({
   const peerReceived = (peerRecRes.data ?? []) as PeerComment[];
   const peerGiven = (peerGivRes.data ?? []) as PeerComment[];
   const conditionLogs = (condRes.data ?? []) as ConditionRow[];
+  const profile = (profileRes.data ?? null) as StudentProfile | null;
+  const lectureProgress = (lectureRes.data as unknown as LectureProgress[]) ?? [];
+
+  // 챕터 코드별 강의 진도 그룹핑
+  const lectureByChapter = new Map<string, LectureProgress[]>();
+  for (const lp of lectureProgress) {
+    const code = lp.mj_courses?.chapter_code ?? "기타";
+    if (!lectureByChapter.has(code)) lectureByChapter.set(code, []);
+    lectureByChapter.get(code)!.push(lp);
+  }
+  // CH.N → order 매핑 (CHAPTERS의 name 컬럼: 'CH.0', 'CH.1' ...)
+  const chapterCodeToOrder = new Map(CHAPTERS.map((ch) => [ch.name, ch.order]));
 
   const byChapter = new Map<number, TimelineRow>();
   for (const t of timeline) {
@@ -195,7 +251,7 @@ export default async function Page({
 
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: "48px 24px" }}>
-      <header style={{ marginBottom: 32 }}>
+      <header style={{ marginBottom: 20 }}>
         <Link
           href="/interviews"
           style={{
@@ -211,6 +267,9 @@ export default async function Page({
           동료평가 받은 {peerReceived.length}건 · 준 {peerGiven.length}건 · 컨디션 {conditionLogs.length}건
         </p>
       </header>
+
+      {/* 개인 배경 프로필 카드 */}
+      {profile && <ProfileCard profile={profile} />}
 
       <h2 style={{ fontSize: 18, margin: "0 0 12px" }}>📈 시계열</h2>
       <p style={{ fontSize: 12, color: "#888", marginTop: 0, marginBottom: 12 }}>
@@ -234,9 +293,10 @@ export default async function Page({
             {CURRICULUM.map((ch) => {
               const data = byChapter.get(ch.order);
               const chInterviews = interviewsByChapter.get(ch.order) ?? [];
+              const chLecture = lectureByChapter.get(ch.name) ?? [];
               return (
                 <div key={ch.order}>
-                  <ChapterCard chapter={ch} data={data} />
+                  <ChapterCard chapter={ch} data={data} lectures={chLecture} />
                   {chInterviews.length > 0 && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8, paddingLeft: 12, borderLeft: "2px solid #E5E7EB" }}>
                       {chInterviews.map((iv) => (
@@ -288,12 +348,51 @@ export default async function Page({
   );
 }
 
+function ProfileCard({ profile }: { profile: StudentProfile }) {
+  const age = profile.birthday
+    ? new Date().getFullYear() - new Date(profile.birthday).getFullYear() + 1
+    : null;
+
+  const items: { label: string; value: string | null | undefined }[] = [
+    { label: "생년월일", value: profile.birthday ? `${profile.birthday.slice(0, 4)}년생${age ? ` (${age}세)` : ""}` : null },
+    { label: "성별", value: profile.gender },
+    { label: "현재 상태", value: profile.occupation },
+    { label: "관련 경험", value: profile.experience_level },
+    { label: "지원 경로", value: profile.join_reference },
+    { label: "페인포인트", value: profile.join_painpoint },
+    { label: "필요한 것", value: profile.join_needs },
+  ].filter((i) => i.value);
+
+  if (items.length === 0) return null;
+
+  return (
+    <section style={{
+      background: "#F8FAFF", border: "1px solid #DBEAFE", borderRadius: 8,
+      padding: "14px 20px", marginBottom: 28,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#3B82F6", marginBottom: 10, letterSpacing: "0.05em" }}>
+        👤 개인 배경
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 24px" }}>
+        {items.map((item) => (
+          <div key={item.label} style={{ display: "flex", gap: 6, fontSize: 13 }}>
+            <span style={{ color: "#9CA3AF", whiteSpace: "nowrap" }}>{item.label}</span>
+            <span style={{ color: "#1F2937", fontWeight: 500 }}>{item.value}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function ChapterCard({
   chapter,
   data,
+  lectures,
 }: {
   chapter: { order: number; name: string; period: string };
   data: TimelineRow | undefined;
+  lectures: LectureProgress[];
 }) {
   const hasData = !!data;
   return (
@@ -337,6 +436,35 @@ function ChapterCard({
             </details>
           )}
         </>
+      )}
+
+      {/* 강의 진도 (데이터 없는 챕터도 강의가 있으면 표시) */}
+      {lectures.length > 0 && (
+        <div style={{ marginTop: hasData ? 16 : 0, paddingTop: hasData ? 16 : 0, borderTop: hasData ? "1px solid #F0F0F0" : "none" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#6B7280", marginBottom: 10, letterSpacing: "0.05em" }}>
+            📚 강의 진도
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {lectures.map((lp) => {
+              const rate = lp.progress_rate ?? 0;
+              const barColor = lp.is_completed ? "#10B981" : rate >= 80 ? "#3B82F6" : rate >= 40 ? "#F59E0B" : "#E5E7EB";
+              return (
+                <div key={lp.course_id}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                    <span style={{ color: "#374151" }}>{lp.mj_courses?.name ?? `course ${lp.course_id}`}</span>
+                    <span style={{ fontWeight: 600, color: lp.is_completed ? "#10B981" : "#6B7280" }}>
+                      {lp.is_completed ? "✓ 완료" : `${rate}%`}
+                      {lp.mj_courses?.hours && <span style={{ fontWeight: 400, color: "#9CA3AF", marginLeft: 4 }}>{lp.mj_courses.hours}h</span>}
+                    </span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: "#F3F4F6", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${rate}%`, background: barColor, borderRadius: 3, transition: "width 0.3s" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
