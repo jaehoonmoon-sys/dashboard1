@@ -222,26 +222,29 @@ export default function TimelineChart({
             yAxisId="main"
             dataKey="interview_y"
             fill="#10B981"
-            shape={(props: { cx: number; cy: number }) => (
-              <g>
-                <line
-                  x1={props.cx}
-                  x2={props.cx}
-                  y1={props.cy - 8}
-                  y2={props.cy + 12}
-                  stroke="#10B981"
-                  strokeWidth={2}
-                />
-                <circle
-                  cx={props.cx}
-                  cy={props.cy}
-                  r={6}
-                  fill="#10B981"
-                  stroke="#FFF"
-                  strokeWidth={2}
-                />
-              </g>
-            )}
+            shape={(props: { cx?: number; cy?: number }) => {
+              if (props.cx == null || props.cy == null) return null;
+              return (
+                <g>
+                  <line
+                    x1={props.cx}
+                    x2={props.cx}
+                    y1={props.cy - 8}
+                    y2={props.cy + 12}
+                    stroke="#10B981"
+                    strokeWidth={2}
+                  />
+                  <circle
+                    cx={props.cx}
+                    cy={props.cy}
+                    r={6}
+                    fill="#10B981"
+                    stroke="#FFF"
+                    strokeWidth={2}
+                  />
+                </g>
+              );
+            }}
             name="면담"
           />
         </ComposedChart>
@@ -304,7 +307,7 @@ type TooltipPayloadItem = {
   };
 };
 
-function CustomTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayloadItem[] }) {
+function CustomTooltip({ active, payload }: { active?: boolean; payload?: readonly TooltipPayloadItem[] }) {
   if (!active || !payload || !payload.length) return null;
 
   const p = payload[0]?.payload;
