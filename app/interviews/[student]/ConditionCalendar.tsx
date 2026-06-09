@@ -146,8 +146,7 @@ export default function ConditionCalendar({ logs }: { logs: ConditionLog[] }) {
                 whiteSpace: "pre-wrap",
               }}
             >
-              {tooltip.log.content.slice(0, 150)}
-              {tooltip.log.content.length > 150 ? "…" : ""}
+              {tooltip.log.content}
             </div>
           )}
         </div>

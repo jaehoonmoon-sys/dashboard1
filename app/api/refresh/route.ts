@@ -165,7 +165,7 @@ function notionRichTextToStr(rt: NotionRichText): string {
   return rt.map(t => t.plain_text).join('');
 }
 
-function blockToMd(block: NotionBlock): string {
+function blockToMd(block: NotionBlock, indent = ''): string {
   const type = block.type;
   const inner = (block[type] ?? {}) as {
     rich_text?: NotionRichText;
@@ -174,19 +174,19 @@ function blockToMd(block: NotionBlock): string {
   };
   const text = notionRichTextToStr(inner.rich_text ?? []);
   switch (type) {
-    case 'paragraph':          return text ? `${text}\n` : '\n';
+    case 'paragraph':          return text ? `${indent}${text}\n` : '\n';
     case 'heading_1':          return `# ${text}\n`;
     case 'heading_2':          return `## ${text}\n`;
     case 'heading_3':          return `### ${text}\n`;
-    case 'bulleted_list_item': return `- ${text}\n`;
-    case 'numbered_list_item': return `1. ${text}\n`;
-    case 'to_do':              return `- [${inner.checked ? 'x' : ' '}] ${text}\n`;
-    case 'quote':              return `> ${text}\n`;
+    case 'bulleted_list_item': return `${indent}- ${text}\n`;
+    case 'numbered_list_item': return `${indent}1. ${text}\n`;
+    case 'to_do':              return `${indent}- [${inner.checked ? 'x' : ' '}] ${text}\n`;
+    case 'quote':              return `${indent}> ${text}\n`;
     case 'code':               return `\`\`\`${inner.language ?? ''}\n${text}\n\`\`\`\n`;
     case 'divider':            return '---\n';
-    case 'callout':            return `> ${text}\n`;
-    case 'toggle':             return text ? `${text}\n` : '';
-    default:                   return text ? `${text}\n` : '';
+    case 'callout':            return `${indent}> ${text}\n`;
+    case 'toggle':             return text ? `${indent}${text}\n` : '';
+    default:                   return text ? `${indent}${text}\n` : '';
   }
 }
 
@@ -227,12 +227,13 @@ async function notionFetchPages(since?: string): Promise<NotionPage[]> {
   return pages;
 }
 
-async function notionFetchPageContent(pageId: string): Promise<string> {
+async function notionFetchPageContent(blockId: string, depth = 0): Promise<string> {
+  if (depth > 5) return '';
   const blocks: NotionBlock[] = [];
   let cursor: string | undefined;
   while (true) {
     const qs = cursor ? `?page_size=100&start_cursor=${encodeURIComponent(cursor)}` : '?page_size=100';
-    const res = await fetch(`https://api.notion.com/v1/blocks/${pageId}/children${qs}`, {
+    const res = await fetch(`https://api.notion.com/v1/blocks/${blockId}/children${qs}`, {
       headers: {
         'Authorization': `Bearer ${NOTION_TOKEN}`,
         'Notion-Version': NOTION_VER,
@@ -245,7 +246,16 @@ async function notionFetchPageContent(pageId: string): Promise<string> {
     if (!data.has_more) break;
     cursor = data.next_cursor;
   }
-  return blocks.map(blockToMd).join('');
+  const indent = '  '.repeat(depth);
+  const parts: string[] = [];
+  for (const block of blocks) {
+    parts.push(blockToMd(block, indent));
+    if ((block as Record<string, unknown>).has_children) {
+      const childId = (block as Record<string, unknown>).id as string;
+      parts.push(await notionFetchPageContent(childId, depth + 1));
+    }
+  }
+  return parts.join('');
 }
 
 function notionExtractProps(properties: Record<string, unknown>) {

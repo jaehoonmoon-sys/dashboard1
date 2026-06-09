@@ -357,8 +357,8 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: readon
             <div style={{ color: "#DC2626", marginTop: 4, fontWeight: 600, fontSize: 12 }}>🔔 상담 신청</div>
           )}
           {p.content && (
-            <div style={{ fontSize: 12, color: "#666", marginTop: 6, paddingTop: 6, borderTop: "1px solid #F0F0F0", whiteSpace: "pre-wrap", maxHeight: 120, overflow: "hidden", lineHeight: 1.5 }}>
-              {p.content.slice(0, 200)}{p.content.length > 200 ? "…" : ""}
+            <div style={{ fontSize: 12, color: "#666", marginTop: 6, paddingTop: 6, borderTop: "1px solid #F0F0F0", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+              {p.content}
             </div>
           )}
         </>
@@ -394,11 +394,9 @@ function CustomTooltip({ active, payload }: { active?: boolean; payload?: readon
                 marginTop: 6,
                 paddingTop: 6,
                 borderTop: "1px solid #F0F0F0",
-                maxHeight: 200,
-                overflow: "hidden",
               }}
             >
-              <NotionContent content={p.content} compact maxChars={400} />
+              <NotionContent content={p.content} compact />
             </div>
           )}
         </>

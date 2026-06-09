@@ -30,7 +30,7 @@ SUPABASE_URL = os.environ["NEXT_PUBLIC_SUPABASE_URL"]
 SUPABASE_KEY = os.environ["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
 NOTION_TOKEN = os.environ["notion_api_key"]
 
-# 면담 기록 DB의 data_source_id (변경 금지)
+# 면담 기록 DB의 data_source_id (변경 금지 — data_sources.query용 내부 ID)
 # 원본 DB: https://www.notion.so/teamsparta/30b2dc3ef514815eab3addceb673ed8c
 NOTION_DATA_SOURCE_ID = "30b2dc3e-f514-815d-8068-000b27bcf5f6"
 
@@ -38,14 +38,14 @@ NOTION_DATA_SOURCE_ID = "30b2dc3e-f514-815d-8068-000b27bcf5f6"
 # ── 노션 읽기 전용 함수들 ──────────────────────────────────────────────────────
 
 def _fetch_all_pages(notion: NotionClient) -> list:
-    """면담 DB의 모든 페이지를 읽어온다. 읽기 전용 (data_sources.query)."""
+    """면담 DB의 모든 페이지를 읽어온다."""
     pages = []
     cursor = None
     while True:
         kwargs: dict = {}
         if cursor:
             kwargs["start_cursor"] = cursor
-        resp = notion.data_sources.query(NOTION_DATA_SOURCE_ID, **kwargs)  # READ ONLY
+        resp = notion.data_sources.query(NOTION_DATA_SOURCE_ID, **kwargs)
         pages.extend(resp.get("results", []))
         if not resp.get("has_more"):
             break
@@ -53,12 +53,58 @@ def _fetch_all_pages(notion: NotionClient) -> list:
     return pages
 
 
-def _fetch_page_markdown(notion: NotionClient, page_id: str) -> str:
-    """페이지 본문을 마크다운 텍스트로 읽어온다. 읽기 전용 (pages.retrieve_markdown)."""
-    resp = notion.pages.retrieve_markdown(page_id)  # READ ONLY
-    if isinstance(resp, str):
-        return resp
-    return resp.get("markdown", "") if isinstance(resp, dict) else ""
+def _block_to_md(block: dict, indent: str = "") -> str:
+    btype = block.get("type", "")
+    inner = block.get(btype, {})
+    text = "".join(t.get("plain_text", "") for t in inner.get("rich_text", []))
+    if btype == "paragraph":
+        return f"{indent}{text}\n" if text else "\n"
+    elif btype == "heading_1":
+        return f"# {text}\n"
+    elif btype == "heading_2":
+        return f"## {text}\n"
+    elif btype == "heading_3":
+        return f"### {text}\n"
+    elif btype == "bulleted_list_item":
+        return f"{indent}- {text}\n"
+    elif btype == "numbered_list_item":
+        return f"{indent}1. {text}\n"
+    elif btype == "to_do":
+        checked = "x" if inner.get("checked") else " "
+        return f"{indent}- [{checked}] {text}\n"
+    elif btype == "quote":
+        return f"{indent}> {text}\n"
+    elif btype == "code":
+        lang = inner.get("language", "")
+        return f"```{lang}\n{text}\n```\n"
+    elif btype == "divider":
+        return "---\n"
+    else:
+        return f"{indent}{text}\n" if text else ""
+
+
+def _fetch_page_markdown(notion: NotionClient, page_id: str, depth: int = 0) -> str:
+    """페이지 본문을 블록 재귀 조회로 마크다운으로 변환한다."""
+    if depth > 5:
+        return ""
+    blocks = []
+    cursor = None
+    while True:
+        kwargs: dict = {"block_id": page_id, "page_size": 100}
+        if cursor:
+            kwargs["start_cursor"] = cursor
+        resp = notion.blocks.children.list(**kwargs)
+        blocks.extend(resp.get("results", []))
+        if not resp.get("has_more"):
+            break
+        cursor = resp.get("next_cursor")
+    indent = "  " * depth
+    parts = []
+    for block in blocks:
+        parts.append(_block_to_md(block, indent))
+        if block.get("has_children"):
+            parts.append(_fetch_page_markdown(notion, block["id"], depth + 1))
+    return "".join(parts)
 
 
 def _extract_props(page: dict) -> dict:
@@ -96,7 +142,7 @@ def _extract_props(page: dict) -> dict:
 # ── Supabase upsert ────────────────────────────────────────────────────────────
 
 def _upsert(record: dict) -> int:
-    url = f"{SUPABASE_URL}/rest/v1/mj_interview_records"
+    url = f"{SUPABASE_URL}/rest/v1/mj_interview_records?on_conflict=notion_url"
     payload = json.dumps(record, ensure_ascii=False).encode("utf-8")
     headers = {
         "apikey": SUPABASE_KEY,
@@ -110,7 +156,7 @@ def _upsert(record: dict) -> int:
             return resp.status
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:300]
-        print(f"  FAIL {record.get('notion_url', '')[-12:]}: HTTP {e.code} — {body}")
+        print(f"  FAIL {record.get('notion_url', '')[-12:]}: HTTP {e.code} - {body}")
         return e.code
 
 
