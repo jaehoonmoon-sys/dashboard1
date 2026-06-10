@@ -486,16 +486,9 @@ export async function POST() {
     results.peer = { error: String(e) };
   }
 
-  // 5. 노션 면담 기록 → mj_interview_records
+  // 5. 노션 면담 기록 → mj_interview_records (항상 전체 동기화 — 수정 반영을 위해 필터 없이 전체 조회)
   try {
-    const { data: lastRow } = await supabase
-      .from('mj_interview_records')
-      .select('synced_at')
-      .order('synced_at', { ascending: false })
-      .limit(1)
-      .single();
-    const lastSync = lastRow?.synced_at as string | undefined;
-    const pages = await notionFetchPages(lastSync);
+    const pages = await notionFetchPages();
 
     // (student_name, interview_date) 기준 중복 제거 — 같은 면담이 Notion에 여러 페이지로 존재할 경우
     // last_edited_time이 최신인 페이지 하나만 남김
