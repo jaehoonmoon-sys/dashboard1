@@ -24,6 +24,7 @@ type IpStat = {
   ip: string;
   visits: number;
   lastVisit: string;
+  isAdmin: boolean;
 };
 
 function decodePath(path: string) {
@@ -72,8 +73,14 @@ export default function AdminPage() {
     const dailyMap: Record<string, { tutor: number; admin: number }> = {};
     const pageMap: Record<string, { tutor: number; admin: number }> = {};
     const ipMap: Record<string, { visits: number; lastVisit: string }> = {};
+    const adminIpSet = new Set<string>();
 
     for (const row of data) {
+      // 관리자 IP 수집
+      if (row.is_admin && row.ip) {
+        adminIpSet.add(row.ip);
+      }
+
       const date = new Date(row.accessed_at).toLocaleDateString("ko-KR", {
         timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
       });
@@ -86,6 +93,7 @@ export default function AdminPage() {
       if (row.is_admin) pageMap[path].admin++;
       else pageMap[path].tutor++;
 
+      // 튜터 방문 IP만 집계 (관리자 로그인 기록 제외)
       if (!row.is_admin && row.ip) {
         if (!ipMap[row.ip]) ipMap[row.ip] = { visits: 0, lastVisit: row.accessed_at };
         ipMap[row.ip].visits++;
@@ -93,6 +101,11 @@ export default function AdminPage() {
           ipMap[row.ip].lastVisit = row.accessed_at;
         }
       }
+    }
+
+    // 관리자 IP도 목록에 포함 (방문 기록 없어도)
+    for (const ip of adminIpSet) {
+      if (!ipMap[ip]) ipMap[ip] = { visits: 0, lastVisit: "" };
     }
 
     setDaily(
@@ -105,11 +118,15 @@ export default function AdminPage() {
         .map(([page_path, v]) => ({ page_path, ...v }))
         .sort((a, b) => (b.tutor + b.admin) - (a.tutor + a.admin))
     );
-    setIps(
-      Object.entries(ipMap)
-        .map(([ip, v]) => ({ ip, ...v }))
-        .sort((a, b) => b.visits - a.visits)
-    );
+
+    const ipList = Object.entries(ipMap)
+      .map(([ip, v]) => ({ ip, ...v, isAdmin: adminIpSet.has(ip) }))
+      .sort((a, b) => {
+        // 관리자 IP 먼저, 그 다음 방문 수 내림차순
+        if (a.isAdmin !== b.isAdmin) return a.isAdmin ? -1 : 1;
+        return b.visits - a.visits;
+      });
+    setIps(ipList);
     setLoading(false);
   }
 
@@ -152,6 +169,7 @@ export default function AdminPage() {
 
   const totalTutor = daily.reduce((s, r) => s + r.tutor, 0);
   const totalAdmin = daily.reduce((s, r) => s + r.admin, 0);
+  const tutorIpCount = ips.filter(i => !i.isAdmin).length;
 
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "40px 24px" }}>
@@ -169,7 +187,7 @@ export default function AdminPage() {
           { label: "튜터 총 방문", value: totalTutor, color: "#3182CE" },
           { label: "관리자 총 방문", value: totalAdmin, color: "#718096" },
           { label: "활성 일수", value: daily.filter(d => d.tutor > 0).length, color: "#38A169" },
-          { label: "접속 IP 수", value: ips.length, color: "#D69E2E" },
+          { label: "튜터 IP 수", value: tutorIpCount, color: "#D69E2E" },
         ].map(({ label, value, color }) => (
           <div key={label} style={{ background: "#fff", borderRadius: 10, padding: "20px 24px", boxShadow: "0 1px 6px rgba(0,0,0,0.06)" }}>
             <p style={{ margin: "0 0 6px", fontSize: 13, color: "#666" }}>{label}</p>
@@ -213,18 +231,28 @@ export default function AdminPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ borderBottom: "2px solid #EEE" }}>
-                {["IP", "방문 수", "마지막 접속"].map(h => (
-                  <th key={h} style={{ textAlign: h === "IP" ? "left" : "right", padding: "6px 12px", color: "#555", fontWeight: 600 }}>{h}</th>
+                {["구분", "IP", "방문 수", "마지막 접속"].map(h => (
+                  <th key={h} style={{ textAlign: h === "구분" || h === "IP" ? "left" : "right", padding: "6px 12px", color: "#555", fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {ips.map((row) => (
-                <tr key={row.ip} style={{ borderBottom: "1px solid #F0F0F0" }}>
-                  <td style={{ padding: "8px 12px", fontFamily: "monospace", color: "#444" }}>{row.ip || "(미확인)"}</td>
-                  <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#D69E2E" }}>{row.visits}</td>
+                <tr key={row.ip} style={{ borderBottom: "1px solid #F0F0F0", background: row.isAdmin ? "#FAFAFA" : "transparent" }}>
+                  <td style={{ padding: "8px 12px" }}>
+                    {row.isAdmin
+                      ? <span style={{ background: "#2D3748", color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>관리자</span>
+                      : <span style={{ background: "#EBF8FF", color: "#2B6CB0", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>튜터</span>
+                    }
+                  </td>
+                  <td style={{ padding: "8px 12px", fontFamily: "monospace", color: row.isAdmin ? "#999" : "#444" }}>{row.ip || "(미확인)"}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: row.isAdmin ? "#999" : "#D69E2E" }}>
+                    {row.visits > 0 ? row.visits : "-"}
+                  </td>
                   <td style={{ padding: "8px 12px", textAlign: "right", color: "#666", fontSize: 13 }}>
-                    {new Date(row.lastVisit).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                    {row.lastVisit
+                      ? new Date(row.lastVisit).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+                      : "-"}
                   </td>
                 </tr>
               ))}
