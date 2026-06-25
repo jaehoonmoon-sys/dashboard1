@@ -133,6 +133,7 @@ export default function AdminPage() {
   useEffect(() => {
     const hasAdminCookie = document.cookie.split(";").some((c) => c.trim() === "is_admin=true");
     if (hasAdminCookie) {
+      fetch("/api/admin-mode").catch(() => {}); // 쿠키 자동 로그인 시 IP 기록
       setAuthed(true);
       loadStats();
     }
