@@ -12,7 +12,11 @@ export async function POST(req: NextRequest) {
 
   // 관리자 접속은 로그 기록 안 함
   if (!is_admin) {
-    await supabase.from("mj_access_logs").insert({ page_path, session_id });
+    const ip =
+      req.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
+      req.headers.get("x-real-ip") ??
+      "";
+    await supabase.from("mj_access_logs").insert({ page_path, session_id, ip });
   }
 
   return NextResponse.json({ ok: true });
