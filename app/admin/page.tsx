@@ -86,14 +86,11 @@ export default function AdminPage() {
   }
 
   useEffect(() => {
-    // 쿠키가 이미 있으면 바로 로드
-    fetch("/api/log-access", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ page_path: "/admin", session_id: "" }) });
-    document.cookie.split(";").forEach((c) => {
-      if (c.trim().startsWith("is_admin=true")) {
-        setAuthed(true);
-        loadStats();
-      }
-    });
+    const hasAdminCookie = document.cookie.split(";").some((c) => c.trim() === "is_admin=true");
+    if (hasAdminCookie) {
+      setAuthed(true);
+      loadStats();
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

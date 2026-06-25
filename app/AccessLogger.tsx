@@ -12,12 +12,17 @@ function getOrCreateSessionId() {
   return sid;
 }
 
+function isAdminCookie() {
+  return document.cookie.split(";").some((c) => c.trim() === "is_admin=true");
+}
+
 export default function AccessLogger() {
   const pathname = usePathname();
   const lastLogged = useRef<string>("");
 
   useEffect(() => {
     if (lastLogged.current === pathname) return;
+    if (isAdminCookie()) return;
     lastLogged.current = pathname;
 
     const session_id = getOrCreateSessionId();
