@@ -14,7 +14,7 @@ export default function Page() {
         <RefreshButton />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 20 }}>
         <NavCard
           href="/interviews"
           emoji="🎯"
@@ -28,6 +28,13 @@ export default function Page() {
           title="출결 분석"
           description="PM 시트 vs 시스템 출결 비교 분석"
           accent="#10B981"
+        />
+        <NavCard
+          href="/team-assignment"
+          emoji="🧩"
+          title="팀 편성 관리"
+          description="수강생 제외·정성 평가·제약 조건 설정 후 팀 편성 실행"
+          accent="#8B5CF6"
         />
       </div>
     </main>

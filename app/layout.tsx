@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import AccessLogger from "./AccessLogger";
 
 export const metadata: Metadata = {
   title: "Pocketwatch Submission",
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           color: "#1A1A1A",
         }}
       >
+        <AccessLogger />
         {children}
       </body>
     </html>

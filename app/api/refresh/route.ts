@@ -119,7 +119,8 @@ async function fetchRedashWithRefresh(queryId: string, readKey: string): Promise
   const { job } = await refreshRes.json() as { job: { id: string } };
   if (!job?.id) throw new Error('Redash job ID 없음');
 
-  for (let i = 0; i < 45; i++) {
+  // 최대 3분(90회 × 2초) 폴링
+  for (let i = 0; i < 90; i++) {
     await new Promise(r => setTimeout(r, 2000));
     const jobRes = await fetch(`${REDASH_BASE}/api/jobs/${job.id}?api_key=${USER_KEY}`, { cache: 'no-store' });
     const { job: j } = await jobRes.json() as { job: { status: number } };
@@ -131,7 +132,16 @@ async function fetchRedashWithRefresh(queryId: string, readKey: string): Promise
     if (j.status === 4) throw new Error('Redash 쿼리 실패');
     if (j.status === 5) throw new Error('Redash 쿼리 취소');
   }
-  throw new Error('Redash 90초 내 완료 안 됨');
+
+  // 3분 내 완료 안 됨 → Redash job은 백그라운드에서 계속 실행 중
+  // 에러 대신 마지막 캐시 결과를 반환 (다음 새로고침 시 최신 결과가 들어옴)
+  try {
+    const cached = await fetchRedashCached(queryId, readKey);
+    if (cached.length > 0) return cached;
+  } catch {
+    // 캐시도 없으면 빈 배열 반환 (upsert 0건 처리)
+  }
+  throw new Error('Redash 3분 초과 — 백그라운드 실행 중, 잠시 후 재시도');
 }
 
 // ── Redash 캐시 결과만 조회 ────────────────────────────────────────────────────
@@ -292,6 +302,53 @@ function notionExtractProps(properties: Record<string, unknown>) {
     types:          multiSel(properties['유형']),
     interviewer:    people(properties['면담자']),
   };
+}
+
+// ── Redash 즉석 SQL 실행 (저장 쿼리 없이 개인 API 키로) ──────────────────────
+
+const TEAM_SQL = `
+SELECT
+    rc._id                                                      AS chapter_mongo_id,
+    t._id                                                       AS team_mongo_id,
+    t.num                                                       AS team_num,
+    t.leader                                                    AS leader_user_id,
+    BTRIM(m.name::varchar, '"')                                 AS member_name,
+    JSON_EXTRACT_PATH_TEXT(JSON_SERIALIZE(m), 'userId')         AS member_user_id,
+    JSON_EXTRACT_PATH_TEXT(JSON_SERIALIZE(m), 'enrolledId')     AS member_enrolled_id
+FROM dbnbcamp_teams t
+JOIN dbnbcamp_rounds_chapters rc ON rc._id = t.roundchapterid
+, t.members AS m
+WHERE t.roundclassid = '69147186ca02516451cfc29d'
+  AND t.isactive = true
+  AND t.__hevo__marked_deleted = false
+  AND rc.__hevo__marked_deleted = false
+ORDER BY rc.startdate, t.num, member_name
+`;
+
+async function fetchRedashAdHoc(sql: string): Promise<RedashRow[]> {
+  const res = await fetch(`${REDASH_BASE}/api/query_results`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Key ${USER_KEY}` },
+    body: JSON.stringify({ data_source_id: 1, query: sql, max_age: 0 }),
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(`Redash ad-hoc HTTP ${res.status}`);
+  const { job } = await res.json() as { job: { id: string } };
+
+  for (let i = 0; i < 30; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const jr = await fetch(`${REDASH_BASE}/api/jobs/${job.id}?api_key=${USER_KEY}`, { cache: 'no-store' });
+    const { job: j } = await jr.json() as { job: { status: number; query_result_id?: number; error?: string } };
+    if (j.status === 3 && j.query_result_id) {
+      const dr = await fetch(`${REDASH_BASE}/api/query_results/${j.query_result_id}`, {
+        headers: { 'Authorization': `Key ${USER_KEY}` }, cache: 'no-store',
+      });
+      const d = await dr.json() as { query_result: { data: { rows: RedashRow[] } } };
+      return d.query_result.data.rows ?? [];
+    }
+    if (j.status === 4) throw new Error(`Redash query failed: ${j.error}`);
+  }
+  throw new Error('Redash ad-hoc query timeout (90s)');
 }
 
 // ── POST /api/refresh ─────────────────────────────────────────────────────────
@@ -529,6 +586,96 @@ export async function POST() {
     results.interviews = { ok: true, upserted };
   } catch (e) {
     results.interviews = { error: String(e) };
+  }
+
+  // 6. Redash (AWarehouse 즉석 쿼리) → mj_teams + mj_team_members
+  try {
+    const rows = await fetchRedashAdHoc(TEAM_SQL);
+
+    // 챕터 → 팀 → 팀원 계층 구조로 재편성
+    type Member = { nbcamp_enrolled_id: string; nbcamp_user_id: string; name: string; is_leader: boolean };
+    type TeamEntry = { team_num: number; leader_user_id: string; members: Member[] };
+    const chapters = new Map<string, Map<string, TeamEntry>>();
+
+    for (const row of rows) {
+      const cid = row['chapter_mongo_id'] as string;
+      const tid = row['team_mongo_id'] as string;
+      if (!chapters.has(cid)) chapters.set(cid, new Map());
+      const teams = chapters.get(cid)!;
+      if (!teams.has(tid)) {
+        teams.set(tid, { team_num: row['team_num'] as number, leader_user_id: row['leader_user_id'] as string, members: [] });
+      }
+      const team = teams.get(tid)!;
+      const uid = row['member_user_id'] as string;
+      team.members.push({
+        nbcamp_enrolled_id: row['member_enrolled_id'] as string,
+        nbcamp_user_id: uid,
+        name: row['member_name'] as string,
+        is_leader: uid === team.leader_user_id,
+      });
+    }
+
+    // 룩업: mongo_chapter_id → chapter_code
+    const { data: chapData } = await supabase
+      .from('mj_chapters').select('code, mongo_chapter_id').not('mongo_chapter_id', 'is', null);
+    const mongoToCode = new Map((chapData ?? []).map(c => [c.mongo_chapter_id as string, c.code as string]));
+
+    // 룩업: nbcamp_user_id → mj_students.id
+    const { data: studData } = await supabase
+      .from('mj_students').select('id, nbcamp_user_id').not('nbcamp_user_id', 'is', null);
+    const userToSid = new Map((studData ?? []).map(s => [s.nbcamp_user_id as string, s.id as number]));
+
+    let totalTeams = 0, totalMembers = 0;
+
+    for (const [chapterMongoId, teamsMap] of chapters) {
+      const chapterCode = mongoToCode.get(chapterMongoId);
+      if (!chapterCode) continue;
+
+      // 사라진 팀 삭제 (CASCADE → 팀원도 자동 삭제)
+      const { data: existing } = await supabase
+        .from('mj_teams').select('id, mongo_team_id').eq('chapter_code', chapterCode);
+      const stale = (existing ?? []).filter(t => !teamsMap.has(t.mongo_team_id as string)).map(t => t.id as number);
+      if (stale.length > 0) await supabase.from('mj_teams').delete().in('id', stale);
+
+      // 팀 upsert
+      const teamRecords = Array.from(teamsMap.entries()).map(([mongo_team_id, team]) => ({
+        chapter_code: chapterCode,
+        mongo_team_id,
+        team_num: team.team_num,
+        leader_name: team.members.find(m => m.is_leader)?.name ?? null,
+        leader_nbcamp_user_id: team.leader_user_id,
+        leader_student_id: userToSid.get(team.leader_user_id) ?? null,
+      }));
+
+      const { data: upserted, error: tErr } = await supabase
+        .from('mj_teams').upsert(teamRecords, { onConflict: 'mongo_team_id' }).select('id, mongo_team_id');
+      if (tErr) throw new Error(tErr.message);
+      totalTeams += (upserted ?? []).length;
+
+      const mongoToTeamId = new Map((upserted ?? []).map(t => [t.mongo_team_id as string, t.id as number]));
+
+      // 팀원 재동기화: DELETE → INSERT (추가/제거/변경 모두 처리)
+      for (const [mongo_team_id, team] of teamsMap) {
+        const teamId = mongoToTeamId.get(mongo_team_id);
+        if (!teamId) continue;
+        await supabase.from('mj_team_members').delete().eq('team_id', teamId);
+        const memberRecords = team.members.map(m => ({
+          team_id: teamId,
+          nbcamp_enrolled_id: m.nbcamp_enrolled_id,
+          nbcamp_user_id: m.nbcamp_user_id,
+          name: m.name,
+          is_leader: m.is_leader,
+          student_id: userToSid.get(m.nbcamp_user_id) ?? null,
+        }));
+        const { error: mErr } = await supabase.from('mj_team_members').insert(memberRecords);
+        if (mErr) throw new Error(mErr.message);
+        totalMembers += memberRecords.length;
+      }
+    }
+
+    results.teams = { ok: true, teams: totalTeams, members: totalMembers };
+  } catch (e) {
+    results.teams = { error: String(e) };
   }
 
   const hasError = Object.values(results).some(r => (r as Record<string, unknown>).error);
