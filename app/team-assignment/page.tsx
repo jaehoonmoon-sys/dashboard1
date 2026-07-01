@@ -9,7 +9,7 @@ export type Student = {
   id: number;
   student_name: string;
   team_excluded: boolean;
-  mj_student_profiles: { gender: string | null } | null;
+  dm5_student_profiles: { gender: string | null } | null;
 };
 
 export type Chapter = {
@@ -59,26 +59,26 @@ export type DraftResult = {
 export default async function Page() {
   const [studRes, chapRes, qualRes, constrRes, draftRes] = await Promise.all([
     supabase
-      .from("mj_students")
-      .select("id, student_name, team_excluded, mj_student_profiles(gender)")
+      .from("dm5_students")
+      .select("id, student_name, team_excluded, dm5_student_profiles(gender)")
       .eq("cohort", COHORT)
       .eq("is_active", true)
       .order("student_name"),
     supabase
-      .from("mj_chapters")
+      .from("dm5_chapters")
       .select("code, title, chapter_type")
       .order("code"),
     supabase
-      .from("mj_qual_evaluations")
+      .from("dm5_qual_evaluations")
       .select("*")
       .eq("cohort", COHORT),
     supabase
-      .from("mj_team_constraints")
+      .from("dm5_team_constraints")
       .select("*")
       .eq("cohort", COHORT)
       .order("type"),
     supabase
-      .from("mj_team_draft_results")
+      .from("dm5_team_draft_results")
       .select("*")
       .eq("cohort", COHORT)
       .order("created_at", { ascending: false })
@@ -89,7 +89,7 @@ export default async function Page() {
     <main style={{ maxWidth: 1400, margin: "0 auto", padding: "48px 24px" }}>
       <header style={{ marginBottom: 32 }}>
         <a
-          href="/"
+          href="/marketer-5"
           style={{
             fontSize: 12,
             color: "#999",
@@ -98,7 +98,7 @@ export default async function Page() {
             marginBottom: 8,
           }}
         >
-          ← 메인
+          ← 마케터 5회차
         </a>
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>
           🧩 팀 편성 관리

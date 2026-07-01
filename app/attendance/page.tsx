@@ -29,7 +29,7 @@ export default async function Page() {
   const [sheetRows, sysRows] = await Promise.all([
     fetchAllPages<{ date: string; type: string; student_name: string }>((from, to) =>
       supabase
-        .from("mj_attendance")
+        .from("dm5_attendance")
         .select("date, type, student_name")
         .lte("date", today)
         .order("date")
@@ -37,7 +37,7 @@ export default async function Page() {
     ),
     fetchAllPages<{ date: string; status: string; student_name: string }>((from, to) =>
       supabase
-        .from("mj_attendance_log")
+        .from("dm5_attendance_log")
         .select("date, status, student_name")
         .eq("cohort", COHORT)
         .lte("date", today)
@@ -118,7 +118,7 @@ export default async function Page() {
   return (
     <main style={{ maxWidth: 1200, margin: "0 auto", padding: "48px 24px" }}>
       <header style={{ marginBottom: 32 }}>
-        <a href="/" style={{ fontSize: 12, color: "#999", textDecoration: "none", display: "block", marginBottom: 8 }}>← 메인</a>
+        <a href="/marketer-5" style={{ fontSize: 12, color: "#999", textDecoration: "none", display: "block", marginBottom: 8 }}>← 마케터 5회차</a>
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>📋 출결 비교 분석</h1>
         <p style={{ color: "#666", marginTop: 8, marginBottom: 0 }}>
           PM 시트(구글) vs 시스템(리대시) · 전체 {comparisons.length}일 · 비교 가능 {comparableDays.length}일 · 기준: 결석 여부

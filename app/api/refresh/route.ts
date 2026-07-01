@@ -356,7 +356,7 @@ async function fetchRedashAdHoc(sql: string): Promise<RedashRow[]> {
 export async function POST() {
   const results: Record<string, unknown> = {};
 
-  // 0. Redash 다면평가(7200) → mj_evaluations
+  // 0. Redash 다면평가(7200) → dm5_evaluations
   try {
     const rows = await fetchRedashWithRefresh(EVAL_QID, EVAL_KEY);
     const now = new Date().toISOString();
@@ -390,7 +390,7 @@ export async function POST() {
     let upserted = 0;
     for (let i = 0; i < records.length; i += 200) {
       const { error } = await supabase
-        .from('mj_evaluations')
+        .from('dm5_evaluations')
         .upsert(records.slice(i, i + 200), { onConflict: 'cohort,student_name,chapter,submitted_at' });
       if (error) throw new Error(error.message);
       upserted += Math.min(200, records.length - i);
@@ -400,7 +400,7 @@ export async function POST() {
     results.evaluations = { error: String(e) };
   }
 
-  // 1. 구글시트 출결 → mj_attendance
+  // 1. 구글시트 출결 → dm5_attendance
   try {
     const token  = await getGoogleToken();
     const rows   = await fetchSheet(token);
@@ -447,7 +447,7 @@ export async function POST() {
     let upserted = 0;
     for (let i = 0; i < records.length; i += 200) {
       const { error } = await supabase
-        .from('mj_attendance')
+        .from('dm5_attendance')
         .upsert(records.slice(i, i + 200), { onConflict: 'student_no,date' });
       if (error) throw new Error(error.message);
       upserted += Math.min(200, records.length - i);
@@ -457,7 +457,7 @@ export async function POST() {
     results.attendance = { error: String(e) };
   }
 
-  // 2. Redash 출결 로그 → mj_attendance_log
+  // 2. Redash 출결 로그 → dm5_attendance_log
   try {
     const rows = await fetchRedashCached(ATTEND_LOG_QID, ATTEND_LOG_KEY);
     const records = rows
@@ -475,7 +475,7 @@ export async function POST() {
     let upserted = 0;
     for (let i = 0; i < records.length; i += 200) {
       const { error } = await supabase
-        .from('mj_attendance_log')
+        .from('dm5_attendance_log')
         .upsert(records.slice(i, i + 200), { onConflict: 'user_id,date' });
       if (error) throw new Error(error.message);
       upserted += Math.min(200, records.length - i);
@@ -485,10 +485,10 @@ export async function POST() {
     results.attendanceLog = { error: String(e) };
   }
 
-  // 3. Redash 컨디션 → mj_condition_logs
+  // 3. Redash 컨디션 → dm5_condition_logs
   try {
     const rows = await fetchRedashWithRefresh('7212', COND_KEY);
-    const records = rows
+    const rawRecords = rows
       .filter(r => !r['__hevo__marked_deleted'])
       .map(r => ({
         student_name:   r['수강생_이름'] as string | null,
@@ -500,10 +500,14 @@ export async function POST() {
         logged_at:      r['createdat'] as string | null,
         mongo_id:       r['_id'] as string,
       }));
+    // 동일 배치 내 mongo_id 중복 시 "ON CONFLICT DO UPDATE command cannot affect row a second time" 발생 방지
+    const seen = new Map<string, typeof rawRecords[0]>();
+    for (const rec of rawRecords) seen.set(rec.mongo_id, rec);
+    const records = Array.from(seen.values());
     let upserted = 0;
     for (let i = 0; i < records.length; i += 200) {
       const { error } = await supabase
-        .from('mj_condition_logs')
+        .from('dm5_condition_logs')
         .upsert(records.slice(i, i + 200), { onConflict: 'mongo_id' });
       if (error) throw new Error(error.message);
       upserted += Math.min(200, records.length - i);
@@ -513,7 +517,7 @@ export async function POST() {
     results.condition = { error: String(e) };
   }
 
-  // 4. Redash 동료평가 → mj_peer_comments
+  // 4. Redash 동료평가 → dm5_peer_comments
   try {
     const rows = await fetchRedashWithRefresh('7208', PEER_KEY);
     const records = rows.map(r => ({
@@ -533,7 +537,7 @@ export async function POST() {
     let upserted = 0;
     for (let i = 0; i < records.length; i += 200) {
       const { error } = await supabase
-        .from('mj_peer_comments')
+        .from('dm5_peer_comments')
         .upsert(records.slice(i, i + 200), { onConflict: 'evaluator_name,evaluated_name,chapter' });
       if (error) throw new Error(error.message);
       upserted += Math.min(200, records.length - i);
@@ -543,7 +547,7 @@ export async function POST() {
     results.peer = { error: String(e) };
   }
 
-  // 5. 노션 면담 기록 → mj_interview_records (항상 전체 동기화 — 수정 반영을 위해 필터 없이 전체 조회)
+  // 5. 노션 면담 기록 → dm5_interview_records (항상 전체 동기화 — 수정 반영을 위해 필터 없이 전체 조회)
   try {
     const pages = await notionFetchPages();
 
@@ -569,7 +573,7 @@ export async function POST() {
       // DB에 같은 student+date지만 다른 notion_url인 잔여 중복 레코드 제거
       if (props.student_name && props.interview_date) {
         await supabase
-          .from('mj_interview_records')
+          .from('dm5_interview_records')
           .delete()
           .eq('student_name', props.student_name)
           .eq('interview_date', props.interview_date)
@@ -578,7 +582,7 @@ export async function POST() {
 
       const content = await notionFetchPageContent(page.id);
       const { error } = await supabase
-        .from('mj_interview_records')
+        .from('dm5_interview_records')
         .upsert({ notion_url: notionUrl, content, synced_at: now, ...props }, { onConflict: 'notion_url' });
       if (error) throw new Error(error.message);
       upserted++;
@@ -588,7 +592,7 @@ export async function POST() {
     results.interviews = { error: String(e) };
   }
 
-  // 6. Redash (AWarehouse 즉석 쿼리) → mj_teams + mj_team_members
+  // 6. Redash (AWarehouse 즉석 쿼리) → dm5_teams + dm5_team_members
   try {
     const rows = await fetchRedashAdHoc(TEAM_SQL);
 
@@ -617,12 +621,12 @@ export async function POST() {
 
     // 룩업: mongo_chapter_id → chapter_code
     const { data: chapData } = await supabase
-      .from('mj_chapters').select('code, mongo_chapter_id').not('mongo_chapter_id', 'is', null);
+      .from('dm5_chapters').select('code, mongo_chapter_id').not('mongo_chapter_id', 'is', null);
     const mongoToCode = new Map((chapData ?? []).map(c => [c.mongo_chapter_id as string, c.code as string]));
 
-    // 룩업: nbcamp_user_id → mj_students.id
+    // 룩업: nbcamp_user_id → dm5_students.id
     const { data: studData } = await supabase
-      .from('mj_students').select('id, nbcamp_user_id').not('nbcamp_user_id', 'is', null);
+      .from('dm5_students').select('id, nbcamp_user_id').not('nbcamp_user_id', 'is', null);
     const userToSid = new Map((studData ?? []).map(s => [s.nbcamp_user_id as string, s.id as number]));
 
     let totalTeams = 0, totalMembers = 0;
@@ -633,9 +637,9 @@ export async function POST() {
 
       // 사라진 팀 삭제 (CASCADE → 팀원도 자동 삭제)
       const { data: existing } = await supabase
-        .from('mj_teams').select('id, mongo_team_id').eq('chapter_code', chapterCode);
+        .from('dm5_teams').select('id, mongo_team_id').eq('chapter_code', chapterCode);
       const stale = (existing ?? []).filter(t => !teamsMap.has(t.mongo_team_id as string)).map(t => t.id as number);
-      if (stale.length > 0) await supabase.from('mj_teams').delete().in('id', stale);
+      if (stale.length > 0) await supabase.from('dm5_teams').delete().in('id', stale);
 
       // 팀 upsert
       const teamRecords = Array.from(teamsMap.entries()).map(([mongo_team_id, team]) => ({
@@ -648,7 +652,7 @@ export async function POST() {
       }));
 
       const { data: upserted, error: tErr } = await supabase
-        .from('mj_teams').upsert(teamRecords, { onConflict: 'mongo_team_id' }).select('id, mongo_team_id');
+        .from('dm5_teams').upsert(teamRecords, { onConflict: 'mongo_team_id' }).select('id, mongo_team_id');
       if (tErr) throw new Error(tErr.message);
       totalTeams += (upserted ?? []).length;
 
@@ -658,7 +662,7 @@ export async function POST() {
       for (const [mongo_team_id, team] of teamsMap) {
         const teamId = mongoToTeamId.get(mongo_team_id);
         if (!teamId) continue;
-        await supabase.from('mj_team_members').delete().eq('team_id', teamId);
+        await supabase.from('dm5_team_members').delete().eq('team_id', teamId);
         const memberRecords = team.members.map(m => ({
           team_id: teamId,
           nbcamp_enrolled_id: m.nbcamp_enrolled_id,
@@ -667,7 +671,7 @@ export async function POST() {
           is_leader: m.is_leader,
           student_id: userToSid.get(m.nbcamp_user_id) ?? null,
         }));
-        const { error: mErr } = await supabase.from('mj_team_members').insert(memberRecords);
+        const { error: mErr } = await supabase.from('dm5_team_members').insert(memberRecords);
         if (mErr) throw new Error(mErr.message);
         totalMembers += memberRecords.length;
       }

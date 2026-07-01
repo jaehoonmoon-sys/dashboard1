@@ -71,7 +71,7 @@ type LectureProgress = {
   progress_rate: number;
   is_completed: boolean;
   course_id: number;
-  mj_courses: {
+  dm5_courses: {
     id: number;
     name: string;
     chapter_code: string;
@@ -96,7 +96,7 @@ export default async function Page({
 
   // 먼저 student_id를 가져온 뒤 profile · lecture 조회에 사용
   const studentRes = await supabase
-    .from("mj_students")
+    .from("dm5_students")
     .select("id")
     .eq("student_name", studentName)
     .maybeSingle();
@@ -104,44 +104,44 @@ export default async function Page({
 
   const [tlRes, intvRes, peerRecRes, peerGivRes, condRes, profileRes, lectureRes] = await Promise.all([
     supabase
-      .from("mj_student_timeline")
+      .from("dm5_student_timeline")
       .select("*")
       .eq("student_name", studentName)
       .eq("cohort", "AI 기반 디지털 마케팅 부트캠프 5회차")
       .order("chapter_order", { ascending: true }),
     supabase
-      .from("mj_interview_records")
+      .from("dm5_interview_records")
       .select("*")
       .eq("student_name", studentName)
       .order("interview_date", { ascending: true }),
     supabase
-      .from("mj_peer_comments")
+      .from("dm5_peer_comments")
       .select("*")
       .eq("evaluated_name", studentName)
       .neq("evaluator_name", studentName)
       .order("submitted_at", { ascending: true }),
     supabase
-      .from("mj_peer_comments")
+      .from("dm5_peer_comments")
       .select("*")
       .eq("evaluator_name", studentName)
       .neq("evaluated_name", studentName)
       .order("submitted_at", { ascending: true }),
     supabase
-      .from("mj_condition_logs")
+      .from("dm5_condition_logs")
       .select("*")
       .eq("student_name", studentName)
       .order("logged_at", { ascending: true }),
     studentId
       ? supabase
-          .from("mj_student_profiles")
+          .from("dm5_student_profiles")
           .select("birthday,gender,occupation,experience_level,join_reference,join_painpoint,join_needs")
           .eq("student_id", studentId)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     studentId
       ? supabase
-          .from("mj_lecture_progress")
-          .select("progress_rate, is_completed, course_id, mj_courses(id, name, chapter_code, hours)")
+          .from("dm5_lecture_progress")
+          .select("progress_rate, is_completed, course_id, dm5_courses(id, name, chapter_code, hours)")
           .eq("student_id", studentId)
           .order("course_id")
       : Promise.resolve({ data: [] }),
@@ -159,7 +159,7 @@ export default async function Page({
   const codeToOrder = new Map(CHAPTERS.map((ch) => [ch.name, ch.order]));
   const lectureByChapter = new Map<number, LectureProgress[]>();
   for (const lp of lectureProgress) {
-    const order = codeToOrder.get(lp.mj_courses?.chapter_code ?? "");
+    const order = codeToOrder.get(lp.dm5_courses?.chapter_code ?? "");
     if (order == null) continue;
     if (!lectureByChapter.has(order)) lectureByChapter.set(order, []);
     lectureByChapter.get(order)!.push(lp);
@@ -219,7 +219,7 @@ export default async function Page({
       ? (
           (
             await supabase
-              .from("mj_student_timeline")
+              .from("dm5_student_timeline")
               .select("student_name, role, chapter")
               .in("student_name", peerNames)
               .not("role", "is", null)
@@ -451,10 +451,10 @@ function ChapterCard({
               return (
                 <div key={lp.course_id}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                    <span style={{ color: "#374151" }}>{lp.mj_courses?.name ?? `course ${lp.course_id}`}</span>
+                    <span style={{ color: "#374151" }}>{lp.dm5_courses?.name ?? `course ${lp.course_id}`}</span>
                     <span style={{ fontWeight: 600, color: lp.is_completed ? "#10B981" : "#6B7280" }}>
                       {lp.is_completed ? "✓ 완료" : `${rate}%`}
-                      {lp.mj_courses?.hours && <span style={{ fontWeight: 400, color: "#9CA3AF", marginLeft: 4 }}>{lp.mj_courses.hours}h</span>}
+                      {lp.dm5_courses?.hours && <span style={{ fontWeight: 400, color: "#9CA3AF", marginLeft: 4 }}>{lp.dm5_courses.hours}h</span>}
                     </span>
                   </div>
                   <div style={{ height: 6, borderRadius: 3, background: "#F3F4F6", overflow: "hidden" }}>

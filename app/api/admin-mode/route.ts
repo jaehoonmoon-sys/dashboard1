@@ -11,7 +11,7 @@ async function logAdminIp(req: NextRequest) {
     req.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
     req.headers.get("x-real-ip") ??
     "";
-  await supabase.from("mj_access_logs").insert({
+  await supabase.from("dm5_access_logs").insert({
     page_path: "/admin",
     session_id: "",
     ip,

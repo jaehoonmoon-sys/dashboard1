@@ -41,27 +41,27 @@ export default async function Page() {
 
   const [summaryRes, intvRes, condRes, teamRes, teamMembersRes, progressRes] = await Promise.all([
     supabase
-      .from("mj_student_summary")
+      .from("dm5_student_summary")
       .select("*")
       .eq("cohort", COHORT)
       .eq("is_active", true),
-    supabase.from("mj_student_interview_stats").select("*"),
+    supabase.from("dm5_student_interview_stats").select("*"),
     supabase
-      .from("mj_condition_logs")
+      .from("dm5_condition_logs")
       .select("student_name, score")
       .gte("logged_at", `${today}T00:00:00`)
       .lte("logged_at", `${today}T23:59:59`)
       .not("student_name", "is", null),
-    // 챕터별 다면평가 점수 (Redash 7200 → mj_evaluations)
+    // 챕터별 다면평가 점수 (Redash 7200 → dm5_evaluations)
     supabase
-      .from("mj_student_timeline")
+      .from("dm5_student_timeline")
       .select("chapter_order, student_name, peer_communication, peer_skill, peer_growth, peer_immersion, nps_score, ops_satisfaction")
       .eq("cohort", COHORT)
       .not("student_name", "is", null),
-    // 팀 편성 + 팀장 (Redash → mj_teams + mj_team_members, 구글 시트 미사용)
+    // 팀 편성 + 팀장 (Redash → dm5_teams + dm5_team_members, 구글 시트 미사용)
     supabase
-      .from("mj_team_members")
-      .select("name, is_leader, mj_teams!inner(team_num, chapter_code)"),
+      .from("dm5_team_members")
+      .select("name, is_leader, dm5_teams!inner(team_num, chapter_code)"),
     // 수강률
     supabase.rpc("get_student_lecture_progress"),
   ]);
@@ -98,12 +98,12 @@ export default async function Page() {
     });
   }
 
-  // 팀 편성 + 팀장: mj_team_members.is_leader 기반 (구글 시트 완전 미사용)
-  type TeamMemberRow = { name: string; is_leader: boolean; mj_teams: { team_num: number; chapter_code: string } };
+  // 팀 편성 + 팀장: dm5_team_members.is_leader 기반 (구글 시트 완전 미사용)
+  type TeamMemberRow = { name: string; is_leader: boolean; dm5_teams: { team_num: number; chapter_code: string } };
   const chapterRoleMap: ChapterRoleMap = {};
 
   for (const raw of (teamMembersRes.data ?? []) as unknown as TeamMemberRow[]) {
-    const t = raw.mj_teams;
+    const t = raw.dm5_teams;
     const order = codeToOrder.get(t.chapter_code);
     if (order == null) continue;
     if ((CHAPTERS.find((c) => c.order === order)?.start ?? "") > today) continue;
@@ -132,7 +132,7 @@ export default async function Page() {
     <main style={{ maxWidth: 1280, margin: "0 auto", padding: "48px 24px" }}>
       <header style={{ marginBottom: 32, display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
         <div>
-          <a href="/" style={{ fontSize: 12, color: "#999", textDecoration: "none", display: "block", marginBottom: 8 }}>← 메인</a>
+          <a href="/marketer-5" style={{ fontSize: 12, color: "#999", textDecoration: "none", display: "block", marginBottom: 8 }}>← 마케터 5회차</a>
           <h1 style={{ fontSize: 28, fontWeight: 700, margin: 0 }}>
             🎯 트랙 저성과자 면담 관리
           </h1>

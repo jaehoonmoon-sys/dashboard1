@@ -68,7 +68,7 @@ export default function TeamAssignmentClient({
       prev.map((s) => (s.id === student.id ? { ...s, team_excluded: newVal } : s))
     );
     await supabase
-      .from("mj_students")
+      .from("dm5_students")
       .update({ team_excluded: newVal })
       .eq("id", student.id);
   }
@@ -101,7 +101,7 @@ export default function TeamAssignmentClient({
         },
       ];
     });
-    await supabase.from("mj_qual_evaluations").upsert(
+    await supabase.from("dm5_qual_evaluations").upsert(
       { student_name: studentName, cohort, chapter_code: selectedQualChapter, label, score, updated_at: now },
       { onConflict: "student_name,cohort,chapter_code" }
     );
@@ -110,7 +110,7 @@ export default function TeamAssignmentClient({
   // ── 탭 3: 제약 조건 CRUD ─────────────────────────────────────────────────────
   async function addConstraint(c: Omit<Constraint, "id" | "cohort" | "created_at">) {
     const { data, error } = await supabase
-      .from("mj_team_constraints")
+      .from("dm5_team_constraints")
       .insert({ ...c, cohort })
       .select()
       .single();
@@ -119,7 +119,7 @@ export default function TeamAssignmentClient({
 
   async function deleteConstraint(id: number) {
     setConstraints((prev) => prev.filter((c) => c.id !== id));
-    await supabase.from("mj_team_constraints").delete().eq("id", id);
+    await supabase.from("dm5_team_constraints").delete().eq("id", id);
   }
 
   // ── 탭 4: 팀 편성 실행 ────────────────────────────────────────────────────────
@@ -212,7 +212,7 @@ export default function TeamAssignmentClient({
             }}
           >
             {students.map((s) => {
-              const gender = s.mj_student_profiles?.gender ?? "?";
+              const gender = s.dm5_student_profiles?.gender ?? "?";
               return (
                 <div
                   key={s.id}
@@ -313,7 +313,7 @@ export default function TeamAssignmentClient({
                     (q) => q.student_name === s.student_name && q.chapter_code === selectedQualChapter
                   );
                   const current = eval_?.label ?? "미입력";
-                  const gender = s.mj_student_profiles?.gender ?? "?";
+                  const gender = s.dm5_student_profiles?.gender ?? "?";
                   return (
                     <tr key={s.id} style={{ borderBottom: "1px solid #F0F0F0" }}>
                       <td style={{ padding: "7px 12px", fontWeight: 500 }}>{s.student_name}</td>

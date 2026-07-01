@@ -64,7 +64,7 @@ export default function AdminPage() {
     setLoading(true);
 
     const { data } = await supabase
-      .from("mj_access_logs")
+      .from("dm5_access_logs")
       .select("accessed_at, page_path, is_admin, ip")
       .order("accessed_at", { ascending: false });
 

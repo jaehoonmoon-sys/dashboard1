@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
       req.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
       req.headers.get("x-real-ip") ??
       "";
-    await supabase.from("mj_access_logs").insert({ page_path, session_id, ip });
+    await supabase.from("dm5_access_logs").insert({ page_path, session_id, ip });
   }
 
   return NextResponse.json({ ok: true });
