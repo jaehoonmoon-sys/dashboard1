@@ -351,336 +351,337 @@ async function fetchRedashAdHoc(sql: string): Promise<RedashRow[]> {
   throw new Error('Redash ad-hoc query timeout (90s)');
 }
 
+// ── 개별 sync 함수들 ──────────────────────────────────────────────────────────
+
+async function syncEvaluations() {
+  const rows = await fetchRedashWithRefresh(EVAL_QID, EVAL_KEY);
+  const now = new Date().toISOString();
+  const records = rows
+    .filter(r => r['이름'] && r['기수명'])
+    .map(r => ({
+      cohort:                    r['기수명']              as string,
+      student_name:              r['이름']                as string,
+      chapter:                   r['챕터']                as string | null,
+      team_no:                   r['팀 번호']             as number | null,
+      role:                      r['역할']                as string | null,
+      peer_communication:        r['소통']                as number | null,
+      self_communication:        r['자평_소통점수']       as number | null,
+      peer_skill:                r['실력']                as number | null,
+      self_skill:                r['자평_실력점수']       as number | null,
+      peer_growth:               r['성장']                as number | null,
+      self_growth:               r['자평_성장점수']       as number | null,
+      peer_immersion:            r['몰입']                as number | null,
+      self_immersion:            r['자평_몰입점수']       as number | null,
+      difficulty:                r['난이도']              as number | null,
+      self_comment_comm_immerse: r['자평_소통/몰입코멘트'] as string | null,
+      self_comment_skill_growth: r['자평_실력/성장코멘트'] as string | null,
+      nps_score:                 r['nps_점수']            as number | null,
+      nps_comment:               r['nps_코멘트']          as string | null,
+      ops_satisfaction:          r['운영_만족도']         as number | null,
+      ops_satisfaction_comment:  r['운영_만족도_코멘트']  as string | null,
+      submitted_at:              r['제출일시']            as string | null,
+      synced_at:                 now,
+    }));
+
+  let upserted = 0;
+  for (let i = 0; i < records.length; i += 200) {
+    const { error } = await supabase
+      .from('dm5_evaluations')
+      .upsert(records.slice(i, i + 200), { onConflict: 'cohort,student_name,chapter,submitted_at' });
+    if (error) throw new Error(error.message);
+    upserted += Math.min(200, records.length - i);
+  }
+  return { ok: true, upserted };
+}
+
+async function syncAttendance() {
+  const token  = await getGoogleToken();
+  const rows   = await fetchSheet(token);
+  const header = rows[1] ?? [];
+  const today  = new Date().toISOString().slice(0, 10);
+
+  const dateCols = new Map<number, string>();
+  for (let i = 6; i < header.length; i++) {
+    const d = parseDate(header[i]);
+    if (d) dateCols.set(i, d);
+  }
+
+  const records: Record<string, unknown>[] = [];
+  for (const row of rows.slice(2)) {
+    if (!row?.[0]) continue;
+    const studentNo = parseInt(row[0]);
+    if (isNaN(studentNo)) continue;
+    const studentName = row[1]?.trim() ?? '';
+    if (!studentName) continue;
+
+    const teamNo             = row[2]?.trim() && /^\d+$/.test(row[2].trim()) ? parseInt(row[2]) : null;
+    const note               = row[3]?.trim() || null;
+    const absenceRatePeriod  = row[4]?.trim() || null;
+    const absenceRateTotal   = row[5]?.trim() || null;
+
+    for (const [colIdx, dateStr] of dateCols) {
+      const cellVal = (row[colIdx] ?? '').trim();
+      let type: string, reason: string | null;
+      if (!cellVal) {
+        if (dateStr > today) continue;
+        type = '출석'; reason = null;
+      } else {
+        ({ type, reason } = parseCell(cellVal));
+      }
+      records.push({
+        student_no: studentNo, student_name: studentName,
+        team_no: teamNo, note,
+        absence_rate_period: absenceRatePeriod, absence_rate_total: absenceRateTotal,
+        date: dateStr, type, reason,
+      });
+    }
+  }
+
+  let upserted = 0;
+  for (let i = 0; i < records.length; i += 200) {
+    const { error } = await supabase
+      .from('dm5_attendance')
+      .upsert(records.slice(i, i + 200), { onConflict: 'student_no,date' });
+    if (error) throw new Error(error.message);
+    upserted += Math.min(200, records.length - i);
+  }
+  return { ok: true, upserted, dateCols: dateCols.size };
+}
+
+async function syncAttendanceLog() {
+  const rows = await fetchRedashCached(ATTEND_LOG_QID, ATTEND_LOG_KEY);
+  const records = rows
+    .filter(r => r['출결일자'])
+    .map(r => ({
+      cohort:        r['기수명']  ?? null,
+      student_name:  r['이름']    ?? null,
+      user_id:       r['유저id']  ?? null,
+      date:          String(r['출결일자']).slice(0, 10),
+      status:        r['출결상태'] ?? null,
+      checkin_time:  r['입실시간'] ?? null,
+      checkout_time: r['퇴실시간'] ?? null,
+    }));
+
+  let upserted = 0;
+  for (let i = 0; i < records.length; i += 200) {
+    const { error } = await supabase
+      .from('dm5_attendance_log')
+      .upsert(records.slice(i, i + 200), { onConflict: 'user_id,date' });
+    if (error) throw new Error(error.message);
+    upserted += Math.min(200, records.length - i);
+  }
+  return { ok: true, upserted };
+}
+
+async function syncCondition() {
+  const rows = await fetchRedashWithRefresh('7212', COND_KEY);
+  const rawRecords = rows
+    .filter(r => !r['__hevo__marked_deleted'])
+    .map(r => ({
+      student_name:   r['수강생_이름'] as string | null,
+      online_user_id: r['onlineuserid'] as string | null,
+      score:          r['score'] as number | null,
+      content:        r['content'] as string | null,
+      contact_request:(r['contactrequest'] as boolean | null) ?? false,
+      tags:           parseJsonField(r['tags']),
+      logged_at:      r['createdat'] as string | null,
+      mongo_id:       r['_id'] as string,
+    }));
+  // 동일 배치 내 mongo_id 중복 시 "ON CONFLICT DO UPDATE command cannot affect row a second time" 발생 방지
+  const seen = new Map<string, typeof rawRecords[0]>();
+  for (const rec of rawRecords) seen.set(rec.mongo_id, rec);
+  const records = Array.from(seen.values());
+
+  let upserted = 0;
+  for (let i = 0; i < records.length; i += 200) {
+    const { error } = await supabase
+      .from('dm5_condition_logs')
+      .upsert(records.slice(i, i + 200), { onConflict: 'mongo_id' });
+    if (error) throw new Error(error.message);
+    upserted += Math.min(200, records.length - i);
+  }
+  return { ok: true, upserted };
+}
+
+async function syncPeerComments() {
+  const rows = await fetchRedashWithRefresh('7208', PEER_KEY);
+  const records = rows.map(r => ({
+    cohort:                r['기수명']          as string | null,
+    evaluator_name:        r['평가자_성함']      as string,
+    evaluated_name:        r['피평가자_성함']    as string,
+    chapter:               r['챕터명']           as string | null,
+    team_no:               r['팀 번호']          as number | null,
+    comm_score:            r['소통_점수']         as number | null,
+    skill_score:           r['실력_점수']         as number | null,
+    comm_skill_comment:    r['소통/몰입_코멘트']  as string | null,
+    immerse_score:         r['몰입_점수']         as number | null,
+    growth_score:          r['성장_점수']         as number | null,
+    immerse_growth_comment:r['실력/성장_코멘트']  as string | null,
+    submitted_at:          r['평가일시']          as string | null,
+  }));
+
+  let upserted = 0;
+  for (let i = 0; i < records.length; i += 200) {
+    const { error } = await supabase
+      .from('dm5_peer_comments')
+      .upsert(records.slice(i, i + 200), { onConflict: 'evaluator_name,evaluated_name,chapter' });
+    if (error) throw new Error(error.message);
+    upserted += Math.min(200, records.length - i);
+  }
+  return { ok: true, upserted };
+}
+
+async function syncInterviews() {
+  const pages = await notionFetchPages();
+
+  // (student_name, interview_date) 기준 중복 제거 — 같은 면담이 Notion에 여러 페이지로 존재할 경우
+  // last_edited_time이 최신인 페이지 하나만 남김
+  const latestById = new Map<string, NotionPage>();
+  for (const page of pages) {
+    const props = notionExtractProps(page.properties);
+    const key = `${props.student_name ?? ''}__${props.interview_date ?? ''}`;
+    const existing = latestById.get(key);
+    if (!existing || page.last_edited_time > existing.last_edited_time) {
+      latestById.set(key, page);
+    }
+  }
+  const selectedPages = Array.from(latestById.values());
+
+  const now = new Date().toISOString();
+  let upserted = 0;
+  for (const page of selectedPages) {
+    const notionUrl = 'https://www.notion.so/' + page.id.replace(/-/g, '');
+    const props = notionExtractProps(page.properties);
+
+    // DB에 같은 student+date지만 다른 notion_url인 잔여 중복 레코드 제거
+    if (props.student_name && props.interview_date) {
+      await supabase
+        .from('dm5_interview_records')
+        .delete()
+        .eq('student_name', props.student_name)
+        .eq('interview_date', props.interview_date)
+        .neq('notion_url', notionUrl);
+    }
+
+    const content = await notionFetchPageContent(page.id);
+    const { error } = await supabase
+      .from('dm5_interview_records')
+      .upsert({ notion_url: notionUrl, content, synced_at: now, ...props }, { onConflict: 'notion_url' });
+    if (error) throw new Error(error.message);
+    upserted++;
+  }
+  return { ok: true, upserted };
+}
+
+async function syncTeams() {
+  const rows = await fetchRedashAdHoc(TEAM_SQL);
+
+  type Member = { nbcamp_enrolled_id: string; nbcamp_user_id: string; name: string; is_leader: boolean };
+  type TeamEntry = { team_num: number; leader_user_id: string; members: Member[] };
+  const chapters = new Map<string, Map<string, TeamEntry>>();
+
+  for (const row of rows) {
+    const cid = row['chapter_mongo_id'] as string;
+    const tid = row['team_mongo_id'] as string;
+    if (!chapters.has(cid)) chapters.set(cid, new Map());
+    const teams = chapters.get(cid)!;
+    if (!teams.has(tid)) {
+      teams.set(tid, { team_num: row['team_num'] as number, leader_user_id: row['leader_user_id'] as string, members: [] });
+    }
+    const team = teams.get(tid)!;
+    const uid = row['member_user_id'] as string;
+    team.members.push({
+      nbcamp_enrolled_id: row['member_enrolled_id'] as string,
+      nbcamp_user_id: uid,
+      name: row['member_name'] as string,
+      is_leader: uid === team.leader_user_id,
+    });
+  }
+
+  const { data: chapData } = await supabase
+    .from('dm5_chapters').select('code, mongo_chapter_id').not('mongo_chapter_id', 'is', null);
+  const mongoToCode = new Map((chapData ?? []).map(c => [c.mongo_chapter_id as string, c.code as string]));
+
+  const { data: studData } = await supabase
+    .from('dm5_students').select('id, nbcamp_user_id').not('nbcamp_user_id', 'is', null);
+  const userToSid = new Map((studData ?? []).map(s => [s.nbcamp_user_id as string, s.id as number]));
+
+  let totalTeams = 0, totalMembers = 0;
+
+  for (const [chapterMongoId, teamsMap] of chapters) {
+    const chapterCode = mongoToCode.get(chapterMongoId);
+    if (!chapterCode) continue;
+
+    // 사라진 팀 삭제 (CASCADE → 팀원도 자동 삭제)
+    const { data: existing } = await supabase
+      .from('dm5_teams').select('id, mongo_team_id').eq('chapter_code', chapterCode);
+    const stale = (existing ?? []).filter(t => !teamsMap.has(t.mongo_team_id as string)).map(t => t.id as number);
+    if (stale.length > 0) await supabase.from('dm5_teams').delete().in('id', stale);
+
+    const teamRecords = Array.from(teamsMap.entries()).map(([mongo_team_id, team]) => ({
+      chapter_code: chapterCode,
+      mongo_team_id,
+      team_num: team.team_num,
+      leader_name: team.members.find(m => m.is_leader)?.name ?? null,
+      leader_nbcamp_user_id: team.leader_user_id,
+      leader_student_id: userToSid.get(team.leader_user_id) ?? null,
+    }));
+
+    const { data: upserted, error: tErr } = await supabase
+      .from('dm5_teams').upsert(teamRecords, { onConflict: 'mongo_team_id' }).select('id, mongo_team_id');
+    if (tErr) throw new Error(tErr.message);
+    totalTeams += (upserted ?? []).length;
+
+    const mongoToTeamId = new Map((upserted ?? []).map(t => [t.mongo_team_id as string, t.id as number]));
+
+    // 팀원 재동기화: DELETE → INSERT (추가/제거/변경 모두 처리)
+    for (const [mongo_team_id, team] of teamsMap) {
+      const teamId = mongoToTeamId.get(mongo_team_id);
+      if (!teamId) continue;
+      await supabase.from('dm5_team_members').delete().eq('team_id', teamId);
+      const memberRecords = team.members.map(m => ({
+        team_id: teamId,
+        nbcamp_enrolled_id: m.nbcamp_enrolled_id,
+        nbcamp_user_id: m.nbcamp_user_id,
+        name: m.name,
+        is_leader: m.is_leader,
+        student_id: userToSid.get(m.nbcamp_user_id) ?? null,
+      }));
+      const { error: mErr } = await supabase.from('dm5_team_members').insert(memberRecords);
+      if (mErr) throw new Error(mErr.message);
+      totalMembers += memberRecords.length;
+    }
+  }
+
+  return { ok: true, teams: totalTeams, members: totalMembers };
+}
+
 // ── POST /api/refresh ─────────────────────────────────────────────────────────
 
 export async function POST() {
-  const results: Record<string, unknown> = {};
+  const [evalRes, attendRes, attendLogRes, condRes, peerRes, interviewRes, teamRes] =
+    await Promise.allSettled([
+      syncEvaluations(),
+      syncAttendance(),
+      syncAttendanceLog(),
+      syncCondition(),
+      syncPeerComments(),
+      syncInterviews(),
+      syncTeams(),
+    ]);
 
-  // 0. Redash 다면평가(7200) → dm5_evaluations
-  try {
-    const rows = await fetchRedashWithRefresh(EVAL_QID, EVAL_KEY);
-    const now = new Date().toISOString();
-    const records = rows
-      .filter(r => r['이름'] && r['기수명'])
-      .map(r => ({
-        cohort:                    r['기수명']              as string,
-        student_name:              r['이름']                as string,
-        chapter:                   r['챕터']                as string | null,
-        team_no:                   r['팀 번호']             as number | null,
-        role:                      r['역할']                as string | null,
-        peer_communication:        r['소통']                as number | null,
-        self_communication:        r['자평_소통점수']       as number | null,
-        peer_skill:                r['실력']                as number | null,
-        self_skill:                r['자평_실력점수']       as number | null,
-        peer_growth:               r['성장']                as number | null,
-        self_growth:               r['자평_성장점수']       as number | null,
-        peer_immersion:            r['몰입']                as number | null,
-        self_immersion:            r['자평_몰입점수']       as number | null,
-        difficulty:                r['난이도']              as number | null,
-        self_comment_comm_immerse: r['자평_소통/몰입코멘트'] as string | null,
-        self_comment_skill_growth: r['자평_실력/성장코멘트'] as string | null,
-        nps_score:                 r['nps_점수']            as number | null,
-        nps_comment:               r['nps_코멘트']          as string | null,
-        ops_satisfaction:          r['운영_만족도']         as number | null,
-        ops_satisfaction_comment:  r['운영_만족도_코멘트']  as string | null,
-        submitted_at:              r['제출일시']            as string | null,
-        synced_at:                 now,
-      }));
+  const toResult = (r: PromiseSettledResult<Record<string, unknown>>) =>
+    r.status === 'fulfilled' ? r.value : { error: String((r as PromiseRejectedResult).reason) };
 
-    let upserted = 0;
-    for (let i = 0; i < records.length; i += 200) {
-      const { error } = await supabase
-        .from('dm5_evaluations')
-        .upsert(records.slice(i, i + 200), { onConflict: 'cohort,student_name,chapter,submitted_at' });
-      if (error) throw new Error(error.message);
-      upserted += Math.min(200, records.length - i);
-    }
-    results.evaluations = { ok: true, upserted };
-  } catch (e) {
-    results.evaluations = { error: String(e) };
-  }
-
-  // 1. 구글시트 출결 → dm5_attendance
-  try {
-    const token  = await getGoogleToken();
-    const rows   = await fetchSheet(token);
-    const header = rows[1] ?? [];
-    const today  = new Date().toISOString().slice(0, 10);
-
-    const dateCols = new Map<number, string>();
-    for (let i = 6; i < header.length; i++) {
-      const d = parseDate(header[i]);
-      if (d) dateCols.set(i, d);
-    }
-
-    const records: Record<string, unknown>[] = [];
-    for (const row of rows.slice(2)) {
-      if (!row?.[0]) continue;
-      const studentNo = parseInt(row[0]);
-      if (isNaN(studentNo)) continue;
-      const studentName = row[1]?.trim() ?? '';
-      if (!studentName) continue;
-
-      const teamNo             = row[2]?.trim() && /^\d+$/.test(row[2].trim()) ? parseInt(row[2]) : null;
-      const note               = row[3]?.trim() || null;
-      const absenceRatePeriod  = row[4]?.trim() || null;
-      const absenceRateTotal   = row[5]?.trim() || null;
-
-      for (const [colIdx, dateStr] of dateCols) {
-        const cellVal = (row[colIdx] ?? '').trim();
-        let type: string, reason: string | null;
-        if (!cellVal) {
-          if (dateStr > today) continue;
-          type = '출석'; reason = null;
-        } else {
-          ({ type, reason } = parseCell(cellVal));
-        }
-        records.push({
-          student_no: studentNo, student_name: studentName,
-          team_no: teamNo, note,
-          absence_rate_period: absenceRatePeriod, absence_rate_total: absenceRateTotal,
-          date: dateStr, type, reason,
-        });
-      }
-    }
-
-    let upserted = 0;
-    for (let i = 0; i < records.length; i += 200) {
-      const { error } = await supabase
-        .from('dm5_attendance')
-        .upsert(records.slice(i, i + 200), { onConflict: 'student_no,date' });
-      if (error) throw new Error(error.message);
-      upserted += Math.min(200, records.length - i);
-    }
-    results.attendance = { ok: true, upserted, dateCols: dateCols.size };
-  } catch (e) {
-    results.attendance = { error: String(e) };
-  }
-
-  // 2. Redash 출결 로그 → dm5_attendance_log
-  try {
-    const rows = await fetchRedashCached(ATTEND_LOG_QID, ATTEND_LOG_KEY);
-    const records = rows
-      .filter(r => r['출결일자'])
-      .map(r => ({
-        cohort:        r['기수명']  ?? null,
-        student_name:  r['이름']    ?? null,
-        user_id:       r['유저id']  ?? null,
-        date:          String(r['출결일자']).slice(0, 10),
-        status:        r['출결상태'] ?? null,
-        checkin_time:  r['입실시간'] ?? null,
-        checkout_time: r['퇴실시간'] ?? null,
-      }));
-
-    let upserted = 0;
-    for (let i = 0; i < records.length; i += 200) {
-      const { error } = await supabase
-        .from('dm5_attendance_log')
-        .upsert(records.slice(i, i + 200), { onConflict: 'user_id,date' });
-      if (error) throw new Error(error.message);
-      upserted += Math.min(200, records.length - i);
-    }
-    results.attendanceLog = { ok: true, upserted };
-  } catch (e) {
-    results.attendanceLog = { error: String(e) };
-  }
-
-  // 3. Redash 컨디션 → dm5_condition_logs
-  try {
-    const rows = await fetchRedashWithRefresh('7212', COND_KEY);
-    const rawRecords = rows
-      .filter(r => !r['__hevo__marked_deleted'])
-      .map(r => ({
-        student_name:   r['수강생_이름'] as string | null,
-        online_user_id: r['onlineuserid'] as string | null,
-        score:          r['score'] as number | null,
-        content:        r['content'] as string | null,
-        contact_request:(r['contactrequest'] as boolean | null) ?? false,
-        tags:           parseJsonField(r['tags']),
-        logged_at:      r['createdat'] as string | null,
-        mongo_id:       r['_id'] as string,
-      }));
-    // 동일 배치 내 mongo_id 중복 시 "ON CONFLICT DO UPDATE command cannot affect row a second time" 발생 방지
-    const seen = new Map<string, typeof rawRecords[0]>();
-    for (const rec of rawRecords) seen.set(rec.mongo_id, rec);
-    const records = Array.from(seen.values());
-    let upserted = 0;
-    for (let i = 0; i < records.length; i += 200) {
-      const { error } = await supabase
-        .from('dm5_condition_logs')
-        .upsert(records.slice(i, i + 200), { onConflict: 'mongo_id' });
-      if (error) throw new Error(error.message);
-      upserted += Math.min(200, records.length - i);
-    }
-    results.condition = { ok: true, upserted };
-  } catch (e) {
-    results.condition = { error: String(e) };
-  }
-
-  // 4. Redash 동료평가 → dm5_peer_comments
-  try {
-    const rows = await fetchRedashWithRefresh('7208', PEER_KEY);
-    const records = rows.map(r => ({
-      cohort:                r['기수명']          as string | null,
-      evaluator_name:        r['평가자_성함']      as string,
-      evaluated_name:        r['피평가자_성함']    as string,
-      chapter:               r['챕터명']           as string | null,
-      team_no:               r['팀 번호']          as number | null,
-      comm_score:            r['소통_점수']         as number | null,
-      skill_score:           r['실력_점수']         as number | null,
-      comm_skill_comment:    r['소통/몰입_코멘트']  as string | null,
-      immerse_score:         r['몰입_점수']         as number | null,
-      growth_score:          r['성장_점수']         as number | null,
-      immerse_growth_comment:r['실력/성장_코멘트']  as string | null,
-      submitted_at:          r['평가일시']          as string | null,
-    }));
-    let upserted = 0;
-    for (let i = 0; i < records.length; i += 200) {
-      const { error } = await supabase
-        .from('dm5_peer_comments')
-        .upsert(records.slice(i, i + 200), { onConflict: 'evaluator_name,evaluated_name,chapter' });
-      if (error) throw new Error(error.message);
-      upserted += Math.min(200, records.length - i);
-    }
-    results.peer = { ok: true, upserted };
-  } catch (e) {
-    results.peer = { error: String(e) };
-  }
-
-  // 5. 노션 면담 기록 → dm5_interview_records (항상 전체 동기화 — 수정 반영을 위해 필터 없이 전체 조회)
-  try {
-    const pages = await notionFetchPages();
-
-    // (student_name, interview_date) 기준 중복 제거 — 같은 면담이 Notion에 여러 페이지로 존재할 경우
-    // last_edited_time이 최신인 페이지 하나만 남김
-    const latestById = new Map<string, NotionPage>();
-    for (const page of pages) {
-      const props = notionExtractProps(page.properties);
-      const key = `${props.student_name ?? ''}__${props.interview_date ?? ''}`;
-      const existing = latestById.get(key);
-      if (!existing || page.last_edited_time > existing.last_edited_time) {
-        latestById.set(key, page);
-      }
-    }
-    const selectedPages = Array.from(latestById.values());
-
-    const now = new Date().toISOString();
-    let upserted = 0;
-    for (const page of selectedPages) {
-      const notionUrl = 'https://www.notion.so/' + page.id.replace(/-/g, '');
-      const props = notionExtractProps(page.properties);
-
-      // DB에 같은 student+date지만 다른 notion_url인 잔여 중복 레코드 제거
-      if (props.student_name && props.interview_date) {
-        await supabase
-          .from('dm5_interview_records')
-          .delete()
-          .eq('student_name', props.student_name)
-          .eq('interview_date', props.interview_date)
-          .neq('notion_url', notionUrl);
-      }
-
-      const content = await notionFetchPageContent(page.id);
-      const { error } = await supabase
-        .from('dm5_interview_records')
-        .upsert({ notion_url: notionUrl, content, synced_at: now, ...props }, { onConflict: 'notion_url' });
-      if (error) throw new Error(error.message);
-      upserted++;
-    }
-    results.interviews = { ok: true, upserted };
-  } catch (e) {
-    results.interviews = { error: String(e) };
-  }
-
-  // 6. Redash (AWarehouse 즉석 쿼리) → dm5_teams + dm5_team_members
-  try {
-    const rows = await fetchRedashAdHoc(TEAM_SQL);
-
-    // 챕터 → 팀 → 팀원 계층 구조로 재편성
-    type Member = { nbcamp_enrolled_id: string; nbcamp_user_id: string; name: string; is_leader: boolean };
-    type TeamEntry = { team_num: number; leader_user_id: string; members: Member[] };
-    const chapters = new Map<string, Map<string, TeamEntry>>();
-
-    for (const row of rows) {
-      const cid = row['chapter_mongo_id'] as string;
-      const tid = row['team_mongo_id'] as string;
-      if (!chapters.has(cid)) chapters.set(cid, new Map());
-      const teams = chapters.get(cid)!;
-      if (!teams.has(tid)) {
-        teams.set(tid, { team_num: row['team_num'] as number, leader_user_id: row['leader_user_id'] as string, members: [] });
-      }
-      const team = teams.get(tid)!;
-      const uid = row['member_user_id'] as string;
-      team.members.push({
-        nbcamp_enrolled_id: row['member_enrolled_id'] as string,
-        nbcamp_user_id: uid,
-        name: row['member_name'] as string,
-        is_leader: uid === team.leader_user_id,
-      });
-    }
-
-    // 룩업: mongo_chapter_id → chapter_code
-    const { data: chapData } = await supabase
-      .from('dm5_chapters').select('code, mongo_chapter_id').not('mongo_chapter_id', 'is', null);
-    const mongoToCode = new Map((chapData ?? []).map(c => [c.mongo_chapter_id as string, c.code as string]));
-
-    // 룩업: nbcamp_user_id → dm5_students.id
-    const { data: studData } = await supabase
-      .from('dm5_students').select('id, nbcamp_user_id').not('nbcamp_user_id', 'is', null);
-    const userToSid = new Map((studData ?? []).map(s => [s.nbcamp_user_id as string, s.id as number]));
-
-    let totalTeams = 0, totalMembers = 0;
-
-    for (const [chapterMongoId, teamsMap] of chapters) {
-      const chapterCode = mongoToCode.get(chapterMongoId);
-      if (!chapterCode) continue;
-
-      // 사라진 팀 삭제 (CASCADE → 팀원도 자동 삭제)
-      const { data: existing } = await supabase
-        .from('dm5_teams').select('id, mongo_team_id').eq('chapter_code', chapterCode);
-      const stale = (existing ?? []).filter(t => !teamsMap.has(t.mongo_team_id as string)).map(t => t.id as number);
-      if (stale.length > 0) await supabase.from('dm5_teams').delete().in('id', stale);
-
-      // 팀 upsert
-      const teamRecords = Array.from(teamsMap.entries()).map(([mongo_team_id, team]) => ({
-        chapter_code: chapterCode,
-        mongo_team_id,
-        team_num: team.team_num,
-        leader_name: team.members.find(m => m.is_leader)?.name ?? null,
-        leader_nbcamp_user_id: team.leader_user_id,
-        leader_student_id: userToSid.get(team.leader_user_id) ?? null,
-      }));
-
-      const { data: upserted, error: tErr } = await supabase
-        .from('dm5_teams').upsert(teamRecords, { onConflict: 'mongo_team_id' }).select('id, mongo_team_id');
-      if (tErr) throw new Error(tErr.message);
-      totalTeams += (upserted ?? []).length;
-
-      const mongoToTeamId = new Map((upserted ?? []).map(t => [t.mongo_team_id as string, t.id as number]));
-
-      // 팀원 재동기화: DELETE → INSERT (추가/제거/변경 모두 처리)
-      for (const [mongo_team_id, team] of teamsMap) {
-        const teamId = mongoToTeamId.get(mongo_team_id);
-        if (!teamId) continue;
-        await supabase.from('dm5_team_members').delete().eq('team_id', teamId);
-        const memberRecords = team.members.map(m => ({
-          team_id: teamId,
-          nbcamp_enrolled_id: m.nbcamp_enrolled_id,
-          nbcamp_user_id: m.nbcamp_user_id,
-          name: m.name,
-          is_leader: m.is_leader,
-          student_id: userToSid.get(m.nbcamp_user_id) ?? null,
-        }));
-        const { error: mErr } = await supabase.from('dm5_team_members').insert(memberRecords);
-        if (mErr) throw new Error(mErr.message);
-        totalMembers += memberRecords.length;
-      }
-    }
-
-    results.teams = { ok: true, teams: totalTeams, members: totalMembers };
-  } catch (e) {
-    results.teams = { error: String(e) };
-  }
+  const results = {
+    evaluations:   toResult(evalRes),
+    attendance:    toResult(attendRes),
+    attendanceLog: toResult(attendLogRes),
+    condition:     toResult(condRes),
+    peer:          toResult(peerRes),
+    interviews:    toResult(interviewRes),
+    teams:         toResult(teamRes),
+  };
 
   const hasError = Object.values(results).some(r => (r as Record<string, unknown>).error);
   return NextResponse.json(results, { status: hasError ? 207 : 200 });
