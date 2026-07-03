@@ -6,11 +6,12 @@ import { useRouter } from 'next/navigation';
 type ItemResult = { ok?: boolean; upserted?: number; dateCols?: number; error?: string };
 
 const LABELS: Record<string, string> = {
-  attendance:    '출결(시트)',
-  attendanceLog: '출결(시스템)',
-  condition:     '컨디션',
-  peer:          '동료평가',
-  interviews:    '면담록(노션)',
+  attendance:      '출결(시트)',
+  attendanceLog:   '출결(시스템)',
+  condition:       '컨디션',
+  peer:            '동료평가',
+  interviews:      '면담록(노션)',
+  lectureProgress: '강의 진도율',
 };
 
 export default function RefreshButton() {

@@ -306,6 +306,37 @@ function notionExtractProps(properties: Record<string, unknown>) {
 
 // ── Redash 즉석 SQL 실행 (저장 쿼리 없이 개인 API 키로) ──────────────────────
 
+// ds_id=21 (dbonline_v3, 신 LMS 플랫폼)
+const DS_DBONLINE_V3 = 21;
+const LECTURE_SQL = `
+WITH dima_users AS (
+    SELECT DISTINCT e.user_id
+    FROM enrollment e
+    JOIN product_component pc ON pc.id = e.product_component_id
+    JOIN product p            ON p.id  = pc.product_id
+    WHERE p.business_id = 48
+      AND p.name        = '마케팅 실무의 이해'
+      AND DATE(e.course_start_date) = '2026-04-20'
+      AND e.is_canceled = false
+)
+SELECT
+    u.mongo_user_id                         AS online_user_id,
+    c.id                                    AS course_id,
+    ROUND(e.progress_rate::numeric, 1)      AS progress_rate,
+    e.is_completed
+FROM dima_users du
+JOIN "user"             u  ON u.id  = du.user_id
+JOIN enrollment         e  ON e.user_id = du.user_id
+                          AND e.is_canceled = false
+                          AND e.course_start_date >= '2026-04-20'
+JOIN product_component  pc ON pc.id = e.product_component_id
+JOIN product            p  ON p.id  = pc.product_id AND p.business_id = 48
+JOIN curriculum         cu ON cu.id = pc.component_id
+JOIN course             c  ON c.id  = cu.course_id
+WHERE c.id IN (286, 287, 293, 296, 298, 309, 319, 327, 341, 344)
+ORDER BY u.mongo_user_id, c.id
+`;
+
 const TEAM_SQL = `
 SELECT
     rc._id                                                      AS chapter_mongo_id,
@@ -325,11 +356,11 @@ WHERE t.roundclassid = '69147186ca02516451cfc29d'
 ORDER BY rc.startdate, t.num, member_name
 `;
 
-async function fetchRedashAdHoc(sql: string): Promise<RedashRow[]> {
+async function fetchRedashAdHoc(sql: string, dsId = 1): Promise<RedashRow[]> {
   const res = await fetch(`${REDASH_BASE}/api/query_results`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Key ${USER_KEY}` },
-    body: JSON.stringify({ data_source_id: 1, query: sql, max_age: 0 }),
+    body: JSON.stringify({ data_source_id: dsId, query: sql, max_age: 0 }),
     cache: 'no-store',
   });
   if (!res.ok) throw new Error(`Redash ad-hoc HTTP ${res.status}`);
@@ -573,6 +604,41 @@ async function syncInterviews() {
   return { ok: true, upserted };
 }
 
+async function syncLectureProgress() {
+  const rows = await fetchRedashAdHoc(LECTURE_SQL, DS_DBONLINE_V3);
+
+  // online_user_id → dm5_students.id 매핑
+  const { data: studData } = await supabase
+    .from('dm5_students').select('id, online_user_id').not('online_user_id', 'is', null);
+  const onlineToSid = new Map((studData ?? []).map(s => [s.online_user_id as string, s.id as number]));
+
+  const seen = new Map<string, { student_id: number; course_id: number; progress_rate: number; is_completed: boolean }>();
+  let skipped = 0;
+  for (const r of rows) {
+    const sid = onlineToSid.get(String(r['online_user_id'] ?? ''));
+    if (!sid) { skipped++; continue; }
+    const courseId = Number(r['course_id']);
+    const rate = parseFloat(String(r['progress_rate'] ?? 0));
+    const key = `${sid}:${courseId}`;
+    if (!seen.has(key) || rate > seen.get(key)!.progress_rate) {
+      seen.set(key, { student_id: sid, course_id: courseId, progress_rate: rate, is_completed: Boolean(r['is_completed']) });
+    }
+  }
+
+  const records = Array.from(seen.values());
+  const now = new Date().toISOString();
+  let upserted = 0;
+  for (let i = 0; i < records.length; i += 200) {
+    const { error } = await supabase
+      .from('dm5_lecture_progress')
+      .upsert(records.slice(i, i + 200).map(r => ({ ...r, synced_at: now })), { onConflict: 'student_id,course_id' });
+    if (error) throw new Error(error.message);
+    upserted += Math.min(200, records.length - i);
+  }
+  if (skipped > 0) console.warn(`[lecture_progress] online_user_id 매칭 실패: ${skipped}건`);
+  return { ok: true, upserted, skipped };
+}
+
 async function syncTeams() {
   const rows = await fetchRedashAdHoc(TEAM_SQL);
 
@@ -659,7 +725,7 @@ async function syncTeams() {
 // ── POST /api/refresh ─────────────────────────────────────────────────────────
 
 export async function POST() {
-  const [evalRes, attendRes, attendLogRes, condRes, peerRes, interviewRes, teamRes] =
+  const [evalRes, attendRes, attendLogRes, condRes, peerRes, interviewRes, teamRes, lectureRes] =
     await Promise.allSettled([
       syncEvaluations(),
       syncAttendance(),
@@ -668,19 +734,21 @@ export async function POST() {
       syncPeerComments(),
       syncInterviews(),
       syncTeams(),
+      syncLectureProgress(),
     ]);
 
   const toResult = (r: PromiseSettledResult<Record<string, unknown>>) =>
     r.status === 'fulfilled' ? r.value : { error: String((r as PromiseRejectedResult).reason) };
 
   const results = {
-    evaluations:   toResult(evalRes),
-    attendance:    toResult(attendRes),
-    attendanceLog: toResult(attendLogRes),
-    condition:     toResult(condRes),
-    peer:          toResult(peerRes),
-    interviews:    toResult(interviewRes),
-    teams:         toResult(teamRes),
+    evaluations:     toResult(evalRes),
+    attendance:      toResult(attendRes),
+    attendanceLog:   toResult(attendLogRes),
+    condition:       toResult(condRes),
+    peer:            toResult(peerRes),
+    interviews:      toResult(interviewRes),
+    teams:           toResult(teamRes),
+    lectureProgress: toResult(lectureRes),
   };
 
   const hasError = Object.values(results).some(r => (r as Record<string, unknown>).error);
