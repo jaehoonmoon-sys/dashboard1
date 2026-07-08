@@ -74,7 +74,7 @@ export default function RefreshButton() {
                     {LABELS[key] ?? key}
                     {v.ok
                       ? v.upserted === 0 ? ' ✓ 변경없음' : ` ✓ ${v.upserted}건`
-                      : ` ✗ ${v.error?.slice(0, 30)}`}
+                      : ` ✗ ${v.error?.slice(0, 60)}`}
                   </span>
                 ))
               }

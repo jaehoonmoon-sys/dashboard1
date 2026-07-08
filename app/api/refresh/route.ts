@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { CHAPTERS, dateToChapterOrder } from '@/lib/curriculum';
 
 const REDASH_BASE = (process.env.REDASH_BASE_URL ?? 'https://redash-v2.spartacodingclub.kr').replace(/\/$/, '');
 const env = process.env as Record<string, string | undefined>;
@@ -337,15 +338,19 @@ WHERE c.id IN (286, 287, 293, 296, 298, 309, 319, 327, 341, 344)
 ORDER BY u.mongo_user_id, c.id
 `;
 
+// JSON_SERIALIZE 대신 직접 BTRIM 캐스팅 사용 (AWarehouse Redshift에서 JSON_SERIALIZE 미지원)
+// ORDER BY rc.startdate 로 커리큘럼 챕터 순서(CH.0→CH.9) 보장
 const TEAM_SQL = `
 SELECT
-    rc._id                                                      AS chapter_mongo_id,
-    t._id                                                       AS team_mongo_id,
-    t.num                                                       AS team_num,
-    t.leader                                                    AS leader_user_id,
-    BTRIM(m.name::varchar, '"')                                 AS member_name,
-    JSON_EXTRACT_PATH_TEXT(JSON_SERIALIZE(m), 'userId')         AS member_user_id,
-    JSON_EXTRACT_PATH_TEXT(JSON_SERIALIZE(m), 'enrolledId')     AS member_enrolled_id
+    rc._id                                AS chapter_mongo_id,
+    rc.title                              AS chapter_title,
+    rc.startdate                          AS chapter_startdate,
+    t._id                                 AS team_mongo_id,
+    t.num                                 AS team_num,
+    t.leader                              AS leader_user_id,
+    BTRIM(m.name::varchar, '"')           AS member_name,
+    BTRIM(m.userId::varchar, '"')         AS member_user_id,
+    BTRIM(m.enrolledId::varchar, '"')     AS member_enrolled_id
 FROM dbnbcamp_teams t
 JOIN dbnbcamp_rounds_chapters rc ON rc._id = t.roundchapterid
 , t.members AS m
@@ -643,7 +648,8 @@ async function syncTeams() {
   const rows = await fetchRedashAdHoc(TEAM_SQL);
 
   type Member = { nbcamp_enrolled_id: string; nbcamp_user_id: string; name: string; is_leader: boolean };
-  type TeamEntry = { team_num: number; leader_user_id: string; members: Member[] };
+  type TeamEntry = { team_num: number; leader_user_id: string; members: Member[]; chapter_startdate: string };
+  // SQL이 rc.startdate 기준 정렬이므로 Map 삽입 순서 = 챕터 순서(CH.0→CH.9)
   const chapters = new Map<string, Map<string, TeamEntry>>();
 
   for (const row of rows) {
@@ -652,7 +658,12 @@ async function syncTeams() {
     if (!chapters.has(cid)) chapters.set(cid, new Map());
     const teams = chapters.get(cid)!;
     if (!teams.has(tid)) {
-      teams.set(tid, { team_num: row['team_num'] as number, leader_user_id: row['leader_user_id'] as string, members: [] });
+      teams.set(tid, {
+        team_num: row['team_num'] as number,
+        leader_user_id: row['leader_user_id'] as string,
+        members: [],
+        chapter_startdate: String(row['chapter_startdate'] ?? '').slice(0, 10),
+      });
     }
     const team = teams.get(tid)!;
     const uid = row['member_user_id'] as string;
@@ -664,6 +675,7 @@ async function syncTeams() {
     });
   }
 
+  // 1순위: dm5_chapters.mongo_chapter_id 매핑
   const { data: chapData } = await supabase
     .from('dm5_chapters').select('code, mongo_chapter_id').not('mongo_chapter_id', 'is', null);
   const mongoToCode = new Map((chapData ?? []).map(c => [c.mongo_chapter_id as string, c.code as string]));
@@ -675,7 +687,18 @@ async function syncTeams() {
   let totalTeams = 0, totalMembers = 0;
 
   for (const [chapterMongoId, teamsMap] of chapters) {
-    const chapterCode = mongoToCode.get(chapterMongoId);
+    // 1순위: mongo_chapter_id → chapter_code 직접 매핑
+    let chapterCode = mongoToCode.get(chapterMongoId);
+
+    // 2순위: 매핑 실패 시 chapter_startdate로 커리큘럼 순서 결정
+    if (!chapterCode) {
+      const startdate = teamsMap.values().next().value?.chapter_startdate ?? '';
+      if (startdate) {
+        const order = dateToChapterOrder(startdate);
+        chapterCode = CHAPTERS[order]?.name; // "CH.0" ~ "CH.9"
+      }
+    }
+
     if (!chapterCode) continue;
 
     // 사라진 팀 삭제 (CASCADE → 팀원도 자동 삭제)

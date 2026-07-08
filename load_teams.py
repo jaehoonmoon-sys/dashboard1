@@ -19,14 +19,15 @@ DS_ID = 1  # AWarehouse (Redshift)
 # 챕터별 팀 편성 + 팀원 전체 조회 (패턴 E - 데이터베이스_스키마_가이드.md)
 TEAM_QUERY = """
 SELECT
-    rc._id                                                      AS chapter_mongo_id,
-    rc.title                                                    AS chapter_title,
-    t._id                                                       AS team_mongo_id,
-    t.num                                                       AS team_num,
-    t.leader                                                    AS leader_user_id,
-    BTRIM(m.name::varchar, '"')                                 AS member_name,
-    JSON_EXTRACT_PATH_TEXT(JSON_SERIALIZE(m), 'userId')         AS member_user_id,
-    JSON_EXTRACT_PATH_TEXT(JSON_SERIALIZE(m), 'enrolledId')     AS member_enrolled_id
+    rc._id                                AS chapter_mongo_id,
+    rc.title                              AS chapter_title,
+    rc.startdate                          AS chapter_startdate,
+    t._id                                 AS team_mongo_id,
+    t.num                                 AS team_num,
+    t.leader                              AS leader_user_id,
+    BTRIM(m.name::varchar, '"')           AS member_name,
+    BTRIM(m.userId::varchar, '"')         AS member_user_id,
+    BTRIM(m.enrolledId::varchar, '"')     AS member_enrolled_id
 FROM dbnbcamp_teams t
 JOIN dbnbcamp_rounds_chapters rc ON rc._id = t.roundchapterid
 , t.members AS m
