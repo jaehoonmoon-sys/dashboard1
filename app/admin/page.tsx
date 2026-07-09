@@ -27,6 +27,11 @@ type IpStat = {
   isAdmin: boolean;
 };
 
+type IpLog = {
+  page_path: string;
+  accessed_at: string;
+};
+
 function decodePath(path: string) {
   try {
     return decodeURIComponent(path);
@@ -43,6 +48,8 @@ export default function AdminPage() {
   const [pages, setPages] = useState<PageStat[]>([]);
   const [ips, setIps] = useState<IpStat[]>([]);
   const [loading, setLoading] = useState(false);
+  const [ipLogs, setIpLogs] = useState<Record<string, IpLog[]>>({});
+  const [selectedIp, setSelectedIp] = useState<string | null>(null);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -73,6 +80,7 @@ export default function AdminPage() {
     const dailyMap: Record<string, { tutor: number; admin: number }> = {};
     const pageMap: Record<string, { tutor: number; admin: number }> = {};
     const ipMap: Record<string, { visits: number; lastVisit: string }> = {};
+    const ipLogsMap: Record<string, IpLog[]> = {};
     const adminIpSet = new Set<string>();
 
     for (const row of data) {
@@ -100,8 +108,12 @@ export default function AdminPage() {
         if (row.accessed_at > ipMap[row.ip].lastVisit) {
           ipMap[row.ip].lastVisit = row.accessed_at;
         }
+        if (!ipLogsMap[row.ip]) ipLogsMap[row.ip] = [];
+        ipLogsMap[row.ip].push({ page_path: row.page_path || "/", accessed_at: row.accessed_at });
       }
     }
+
+    setIpLogs(ipLogsMap);
 
     // 관리자 IP도 목록에 포함 (방문 기록 없어도)
     for (const ip of adminIpSet) {
@@ -172,8 +184,72 @@ export default function AdminPage() {
   const totalAdmin = daily.reduce((s, r) => s + r.admin, 0);
   const tutorIpCount = ips.filter(i => !i.isAdmin).length;
 
+  const selectedLogs = selectedIp ? (ipLogs[selectedIp] ?? []) : [];
+
   return (
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "40px 24px" }}>
+
+      {/* IP 상세 로그 모달 */}
+      {selectedIp && (
+        <div
+          onClick={() => setSelectedIp(null)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: "#fff", borderRadius: 12, padding: "28px 32px",
+              width: "min(720px, 92vw)", maxHeight: "80vh",
+              display: "flex", flexDirection: "column",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>IP 방문 상세</h3>
+                <p style={{ margin: "4px 0 0", fontFamily: "monospace", fontSize: 14, color: "#555" }}>{selectedIp}</p>
+              </div>
+              <button
+                onClick={() => setSelectedIp(null)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#999", lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </div>
+            <p style={{ margin: "0 0 16px", fontSize: 13, color: "#888" }}>총 {selectedLogs.length}건 · 최신순</p>
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead style={{ position: "sticky", top: 0, background: "#fff" }}>
+                  <tr style={{ borderBottom: "2px solid #EEE" }}>
+                    <th style={{ textAlign: "left", padding: "6px 12px", color: "#555", fontWeight: 600 }}>시각</th>
+                    <th style={{ textAlign: "left", padding: "6px 12px", color: "#555", fontWeight: 600 }}>페이지</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedLogs.map((log, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #F5F5F5" }}>
+                      <td style={{ padding: "7px 12px", color: "#666", whiteSpace: "nowrap" }}>
+                        {new Date(log.accessed_at).toLocaleString("ko-KR", {
+                          timeZone: "Asia/Seoul",
+                          month: "2-digit", day: "2-digit",
+                          hour: "2-digit", minute: "2-digit", second: "2-digit",
+                        })}
+                      </td>
+                      <td style={{ padding: "7px 12px", fontFamily: "monospace", color: "#333" }}>
+                        {decodePath(log.page_path)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>대시보드 사용량</h1>
@@ -232,14 +308,24 @@ export default function AdminPage() {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
             <thead>
               <tr style={{ borderBottom: "2px solid #EEE" }}>
-                {["구분", "IP", "방문 수", "마지막 접속"].map(h => (
-                  <th key={h} style={{ textAlign: h === "구분" || h === "IP" ? "left" : "right", padding: "6px 12px", color: "#555", fontWeight: 600 }}>{h}</th>
+                {["구분", "IP", "방문 수", "마지막 접속", ""].map(h => (
+                  <th key={h} style={{ textAlign: h === "구분" || h === "IP" || h === "" ? "left" : "right", padding: "6px 12px", color: "#555", fontWeight: 600 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {ips.map((row) => (
-                <tr key={row.ip} style={{ borderBottom: "1px solid #F0F0F0", background: row.isAdmin ? "#FAFAFA" : "transparent" }}>
+                <tr
+                  key={row.ip}
+                  onClick={() => !row.isAdmin && row.visits > 0 ? setSelectedIp(row.ip) : undefined}
+                  style={{
+                    borderBottom: "1px solid #F0F0F0",
+                    background: row.isAdmin ? "#FAFAFA" : "transparent",
+                    cursor: !row.isAdmin && row.visits > 0 ? "pointer" : "default",
+                  }}
+                  onMouseEnter={e => { if (!row.isAdmin && row.visits > 0) (e.currentTarget as HTMLTableRowElement).style.background = "#FFFBEB"; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLTableRowElement).style.background = row.isAdmin ? "#FAFAFA" : "transparent"; }}
+                >
                   <td style={{ padding: "8px 12px" }}>
                     {row.isAdmin
                       ? <span style={{ background: "#2D3748", color: "#fff", borderRadius: 4, padding: "2px 8px", fontSize: 11, fontWeight: 600 }}>관리자</span>
@@ -254,6 +340,9 @@ export default function AdminPage() {
                     {row.lastVisit
                       ? new Date(row.lastVisit).toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
                       : "-"}
+                  </td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: "#BBBBBB", fontSize: 12 }}>
+                    {!row.isAdmin && row.visits > 0 ? "상세 보기 →" : ""}
                   </td>
                 </tr>
               ))}
